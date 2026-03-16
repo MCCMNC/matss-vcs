@@ -1,93 +1,117 @@
 # demo_orm_full.py
+from ConsoleUI import *
+import os
+import django
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+django.setup()
+
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 
-# ── Setup ────────────────────────────────────────────────────────────────
-
-# No need for create_database(); Django migrations already set up the DB
-
 # ── Create users ──────────────────────────────────────────────────────────
-alice = User.objects.create(
+
+alice, _ = User.objects.get_or_create(
     username="alice",
-    email="alice@example.com",
-    password_hash="hashed_pw_123",
-    role="Author"
+    defaults={
+        "email": "alice@example.com",
+        "password_hash": "hashed_pw_123",
+        "role": "Author",
+    }
 )
 
-bob = User.objects.create(
+bob, _ = User.objects.get_or_create(
     username="bob",
-    email="bob@example.com",
-    password_hash="hashed_pw_456",
-    role="Reviewer"
+    defaults={
+        "email": "bob@example.com",
+        "password_hash": "hashed_pw_456",
+        "role": "Reviewer",
+    }
 )
 
-print("Users created: alice (Author), bob (Reviewer)")
+uiParagraph("Users ready: alice (Author), bob (Reviewer)")
 
-# ── Create projects ───────────────────────────────────────────────────────
-project = Project.objects.create(
+# ── Create project ─────────────────────────────────────────────────────────
+
+project, _ = Project.objects.get_or_create(
     title="My First Doc",
-    description="A test project",
-    owner=alice
+    defaults={
+        "description": "A test project",
+        "owner": alice
+    }
 )
 
-print(f"Project created: #{project.id}")
+uiParagraph(f"Project ready: #{project.pk}")
 
-# ── Create versions and files ─────────────────────────────────────────────
-# Initial draft
-v1 = ProjectVersion.objects.create(
+# ── Create version (auto increment) ────────────────────────────────────────
+
+latest = (
+    ProjectVersion.objects
+    .filter(project=project)
+    .order_by("-version_number")
+    .first()
+)
+
+next_version = 1 if not latest else latest.version_number + 1
+
+v1, created = ProjectVersion.objects.get_or_create(
     project=project,
-    version_number=1,
-    author=alice,
-    message="Initial draft"
+    version_number=next_version,
+    defaults={
+        "author": alice,
+        "message": "Initial draft"
+    }
 )
 
-VersionFile.objects.create(
+# ── Create file ────────────────────────────────────────────────────────────
+
+VersionFile.objects.get_or_create(
     version=v1,
     path="docs/readme.md",
-    content="# Hello World"
+    defaults={
+        "content": "# Hello World"
+    }
 )
 
-AuditLog.objects.create(
+# ── Log creation ───────────────────────────────────────────────────────────
+
+AuditLog.objects.get_or_create(
     user=alice,
     project=project,
     action="CREATE_VERSION",
-    details="v1 created"
+    details=f"v{v1.version_number} created"
 )
 
-# Approve version
-v1.status = "Approved"
-v1.save()
+# ── Approve version ────────────────────────────────────────────────────────
 
-AuditLog.objects.create(
+if v1.status != "Approved":
+    v1.status = "Approved"
+    v1.save()
+
+AuditLog.objects.get_or_create(
     user=alice,
     project=project,
     action="APPROVE_VERSION",
-    details="v1 approved"
+    details=f"v{v1.version_number} approved"
 )
 
-print("Smoke test passed!")
+uiParagraph("Smoke test passed!")
 
 # ── Fetch & display ───────────────────────────────────────────────────────
-print("\n" + "=" * 50)
-print("FETCH: All versions of project")
-print("=" * 50)
 
+uiParagraph("FETCHING: All versions of project")
 versions = ProjectVersion.objects.filter(project=project).order_by("version_number")
+
 for v in versions:
     print(f"  v{v.version_number} | {v.status:<10} | {v.message} | by {v.author.username}")
 
-print("\n" + "=" * 50)
-print("FETCH: Files in approved versions")
-print("=" * 50)
+uiParagraph("FETCHING: Files in approved versions")
 
-files = VersionFile.objects.filter(version__project=project, version__status="Approved")
-for f in files:
-    print(f"  {f.path}")
-    print(f"    → {f.content}")
+files = VersionFile.objects.filter(
+    version__project=project,
+    version__status="Approved"
+)
 
-print("\n" + "=" * 50)
-print("FETCH: Audit log")
-print("=" * 50)
-
+uiFiles(files)
+uiParagraph("FETCHING: Audit log")
 logs = AuditLog.objects.filter(project=project).order_by("timestamp")
-for entry in logs:
-    print(f"  [{entry.timestamp}] {entry.user.username} → {entry.action} ({entry.details})")
+uiLogs(logs)
