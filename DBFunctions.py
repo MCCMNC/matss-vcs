@@ -11,6 +11,11 @@ from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 def getProjectByID(inputProjectID):
     return Project.objects.get(pk=inputProjectID)
 
+def getProjectByVersionFile(inputVersionFile):
+    returnedProject = inputVersionFile.version.project
+    # Potential issue: inputVersionFile may be None or not linked to a version/project
+
+    return returnedProject
 
 def getUserProjects(user):
     projects = Project.objects.filter(owner=user) #ISSUE : ONLY FILTERS FOR OWNER
@@ -22,10 +27,11 @@ def getUserProjects(user):
 def getProjectVersionsByProjectID(inputProjectId,approvalStatus):
     return ProjectVersion.objects.filter(project_id=inputProjectId,status=approvalStatus)
 
+def getProjectVersionSpecificByVersionFile(inputVersionFile):
+    return ProjectVersion.objects.get(pk = getProjectByVersionFile(inputVersionFile.version).pk)
 
 def getALlProjectFiles(inputProjectId):
     return VersionFile.objects.filter(version__id__in=getProjectVersionsByProjectID(inputProjectId,"Approved"))
-
 
 
 
@@ -40,8 +46,16 @@ def getOrCreateUser(inputUsername, inputEmail, inputPasswordHash, inputRole):
     )
     return returnedUser
 
-def getOrCreateProject(inputTitle, inputDescription, inputOwner):
-    returnedProject, _ = Project.objects.get_or_create(
+def logCreateProject(inputUser,inputProject):
+    AuditLog.objects.get_or_create(
+        user_id=inputUser.pk,
+        project_id = inputProject.pk,
+        action="CREATE_PROJECT",
+        details=f"ADDED {inputProject.title} to DB"
+    )
+
+def addProjectToDB(inputTitle, inputDescription, inputOwner):
+    currentProject, _ = Project.objects.get_or_create(
         title=inputTitle,
         defaults={
             "description": inputDescription,
@@ -49,22 +63,27 @@ def getOrCreateProject(inputTitle, inputDescription, inputOwner):
         }
     )
     # Potential issue: title may not be unique → existing project may be reused
+    logCreateProject(inputOwner,currentProject)
 
-    return returnedProject
+def logCreateProjectVersion(inputUser, inputProject, inputVersion):
+    returnedLog, _ = AuditLog.objects.get_or_create(
+        user=inputUser,
+        project=inputProject,
+        action="CREATE_VERSION",
+        details=f"{inputProject.title} v{inputVersion.version_number} created"
+    )
+    # Potential issue: duplicate logs if uniqueness is not enforced
 
-
-def getOrCreateNextVersion(inputProject, inputAuthor, inputMessage):
+def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage):
     latest = (
         ProjectVersion.objects
-        .filter(project=inputProject)
+        .filter(project_id=inputProject.pk)
         .order_by("-version_number")
         .first()
     )
     # Potential issue: inputProject may be None → query will fail
-
     nextVersion = 1 if not latest else latest.version_number + 1
-
-    returnedVersion, _ = ProjectVersion.objects.get_or_create(
+    currentVersion, _ = ProjectVersion.objects.get_or_create(
         project=inputProject,
         version_number=nextVersion,
         defaults={
@@ -73,42 +92,47 @@ def getOrCreateNextVersion(inputProject, inputAuthor, inputMessage):
         }
     )
     # Potential issue: race condition → duplicate version numbers possible
+    logCreateProjectVersion(inputAuthor,inputProject,currentVersion)
 
-    return returnedVersion
+def logCreateVersionFile(inputUser,inputProjectVersionFile):
+    AuditLog.objects.get_or_create(
+        user_id=inputUser.pk,
+        project_id = getProjectByVersionFile(inputProjectVersionFile).pk,
+        action="CREATE_VERSION_FILE",
+        details=f"ADDED {inputProjectVersionFile.path} to "
+                f"{getProjectByVersionFile(inputProjectVersionFile).title} "
+                f"Version {inputProjectVersionFile.version.version_number}"
+    )
 
-
-def addFileToDB(inputVersion, inputPath, inputContent):
-    VersionFile.objects.get_or_create(
-        version_id=inputVersion.id,
-        path=inputPath,
+def addFileToDB(inputUser,inputVersion, inputPath, inputContent): ##PATHS SHOULD NOT COLLIDE
+    currentVersionFile , _= VersionFile.objects.get_or_create(
+        version_id = inputVersion.id,
+        path = inputPath,
         content = inputContent
     )
+    logCreateVersionFile(inputUser,currentVersionFile)
     # Potential issue: UNIQUE constraint on (version, path)
 
-
-def logCreateVersion(inputUser, inputProject, inputVersion):
-    returnedLog, _ = AuditLog.objects.get_or_create(
-        user=inputUser,
-        project=inputProject,
-        action="CREATE_VERSION",
-        details=f"v{inputVersion.version_number} created"
+def logRemoveVersionFile(inputUser,inputProjectVersionFile):
+    AuditLog.objects.get_or_create(
+        user_id = inputUser.pk,
+        project_id = getProjectByVersionFile(inputProjectVersionFile).pk,
+        action = "REMOVE_VERSION_FILE",
+        details = f"REMOVED {inputProjectVersionFile.path} FROM DB"
     )
-    # Potential issue: duplicate logs if uniqueness is not enforced
+def removeFIleFromDB(inputUser,inputFilePath):
+    toBeDeletedFile = VersionFile.objects.get(path=inputFilePath)
+    logRemoveVersionFile(inputUser,toBeDeletedFile)
 
-    return returnedLog
-
-
-def approveVersion(inputVersion, inputUser, inputProject):
+def approveProjectVersion(inputVersion, inputUser, inputProject):
     if inputVersion.status != "Approved":
         inputVersion.status = "Approved"
         inputVersion.save()
         # Potential issue: inputVersion may be None or unsaved
-
     returnedLog, _ = AuditLog.objects.get_or_create(
         user=inputUser,
         project=inputProject,
         action="APPROVE_VERSION",
         details=f"v{inputVersion.version_number} approved"
     )
-
     return returnedLog

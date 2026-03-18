@@ -8,10 +8,9 @@ django.setup()
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 mainFuncs = {"Log out":consoleUserLogout,
              "Project List":consoleUserProjectList,
-             "Audit Log":consoleUserProjectAuditLog,
+             "Audit Log":consoleUserAuditLog,
              "File Manager":consoleFileManager
              }
-
 localUser = consoleUserLogin()
 if localUser == 0 :
     exit(500)
