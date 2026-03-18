@@ -121,8 +121,9 @@ def logRemoveVersionFile(inputUser,inputProjectVersionFile):
         details = f"REMOVED {inputProjectVersionFile.path} FROM DB"
     )
 def removeFIleFromDB(inputUser,inputFilePath):
-    toBeDeletedFile = VersionFile.objects.get(path=inputFilePath)
+    toBeDeletedFile = VersionFile.objects.get(path = inputFilePath)
     logRemoveVersionFile(inputUser,toBeDeletedFile)
+    VersionFile.objects.get(path = inputFilePath).delete()
 
 def approveProjectVersion(inputVersion, inputUser, inputProjectID):
     if inputVersion.status != "Approved":
