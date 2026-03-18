@@ -1,11 +1,23 @@
-def uiParagraph(writtenText):
-    print("\n" + "=" * 50)
-    print(writtenText)
-    print("=" * 50)
-def uiFiles(files):
-    for f in files:
+## BASIC UI -----------------------------------------------------
+def printCharLine(inputChar):
+    print("\n" + inputChar * 50)
+def uiError(inputErrorType):
+    print("\n MAT VCS Ran into an " + inputErrorType + " Error")
+## ADVANCED UI -----------------------------------------------------
+def uiParagraph(inputWrittenText): ## Displays any line of text into the console window
+    printCharLine("=")
+    print(inputWrittenText)
+    printCharLine("=")
+def uiFiles(inputFiles): ## Displays data of any file array (or list) in the console window
+    for f in inputFiles:
         print(f"  {f.path}")
         print(f"    → {f.content}")
-def uiLogs(logs):
-    for entry in logs:
-        print(f"  [{entry.timestamp}] {entry.user.username} → {entry.action} ({entry.details})")
+def uiLogs(inputLogs): ## Displays data of any log array (or list) in the consol window
+    for entry in inputLogs:
+        print(f" [{entry.timestamp}] {entry.user.username} → {entry.action} ({entry.details})")
+## USER INPUT -----------------------------------------------------
+def uiUserInputPrompt(inputWrittenText):
+    print(inputWrittenText)
+    print("    -> ", end="")
+    UserInput = input()
+    return UserInput

@@ -1,4 +1,4 @@
-# demo_orm_full.py
+# RETIRED_demo_orm_full.py
 from ConsoleUI import *
 import os
 import django
