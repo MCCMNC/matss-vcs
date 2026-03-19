@@ -35,6 +35,8 @@ def uiFileManagerMenu():
         print("8 : Remove File from DB")
         print("9 : Manage Project Version Approval")
         print("0 : WIPE DB (NOT INCLUDING USERS)")
+        print("\n")
+        print("99 : Log Out")
 
 ## USER INPUT -----------------------------------------------------
 def uiUserInputPrompt(inputWrittenText):

@@ -8,24 +8,28 @@ django.setup()
 
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 
-def consoleUserLogin():
+def consoleUserLogin(inputUser):
     printCharLine("*")
     localUserName = uiUserInputPrompt("Please enter your username:")
     localPassword = uiUserInputPrompt("Please enter your password:")
-
-    potentialUser = User.objects.filter(
-        username = localUserName).first()  # Potential issue: if the username does not exist, potentialUser will be None
-
+    potentialUser = User.objects.filter(username = localUserName).first()  # Potential issue: if the username does not exist, potentialUser will be None
     if potentialUser is None or potentialUser.password_hash != localPassword:
         uiError("Incorrect Login")
         printCharLine("*")
         return 0
     printCharLine("*")
+    if inputUser != "dummyInput" : userLogOut(inputUser)
+    userLogIn(potentialUser)
     return potentialUser
 
 def consoleUserLogout(inputUser):
-    uiParagraph("Successfully logged out from " + inputUser.username)
-
+    inputUser.refresh_from_db()
+    if inputUser.loginStatus:
+        userLogOut(inputUser)
+        uiParagraph("Successfully logged out from " + inputUser.username)
+    elif not inputUser.loginStatus :
+        uiParagraph("You are already logged out!")
+    return "dummyInput"
 def consoleUserProjectList(inputUser):
     printCharLine("*")
     # Projects owned by the user
@@ -57,16 +61,21 @@ def consoleUserAuditLog(inputUser):
 
         uiLogs(logs)
 ## MENUS -----------------------------------------------------
-basicUserMenu = ["Log out", "Project List", "Audit Log","File Manager"]
+basicUserMenu = ["Log out","File Manager"]
 menuMap = {"basicUserMenu":basicUserMenu}
 def consoleMenu(inputMenuType):
+    print(inputMenuType)
+    printCharLine("*")
     currentMenu = menuMap[inputMenuType]
     for i in range(len(currentMenu)):
         print(currentMenu[i] + " : "+ str(i))
     return currentMenu[int(uiUserInputPrompt("Pick an Action"))]
 
-def consoleFileManager(inputUser): ##NEXT STEP HERE
+def consoleFileManager(inputUser):
     while True:
+        inputUser.refresh_from_db()
+        if not inputUser.loginStatus:
+            return "dummyInput"
         uiFileManagerMenu()
         userChoice = input("Select an option: ")
         if userChoice == "1": #List Projects
@@ -112,7 +121,7 @@ def consoleFileManager(inputUser): ##NEXT STEP HERE
             print("REMOVED FILE FROM DB AND CREATED AUDIT LOG SUCCESSFULLY")
         elif userChoice == "9": # manage version approval
             clearConsole()
-            if inputUser.role != "Author" and inputUser.role != "Administrator":
+            if inputUser.role != "Author" and inputUser.role != "Admin":
                 print("INVALID ROLE")
                 continue
             consoleUserProjectList(inputUser)
@@ -135,5 +144,8 @@ def consoleFileManager(inputUser): ##NEXT STEP HERE
             else:
                 print("Canceled database wipe")
                 continue
+        elif userChoice == "99": #Log User Out
+            clearConsole()
+            userLogOut(inputUser)
         else:
             print("Invalid choice")

@@ -125,6 +125,12 @@ def removeFIleFromDB(inputUser,inputFilePath):
     logRemoveVersionFile(inputUser,toBeDeletedFile)
     VersionFile.objects.get(path = inputFilePath).delete()
 
+def userLogOut(inputUser):
+    inputUser.loginStatus = False
+    inputUser.save()
+def userLogIn(inputUser):
+    inputUser.loginStatus = True
+    inputUser.save()
 def approveProjectVersion(inputVersion, inputUser, inputProjectID):
     if inputVersion.status != "Approved":
         inputVersion.status = "Approved"

@@ -15,7 +15,7 @@ class User(models.Model):
     password_hash = models.CharField(max_length=255)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
-
+    loginStatus = models.BooleanField(default=False)
 
 class Project(models.Model):
 

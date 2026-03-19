@@ -7,12 +7,13 @@ django.setup()
 
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 mainFuncs = {"Log out":consoleUserLogout,
-             "Project List":consoleUserProjectList,
-             "Audit Log":consoleUserAuditLog,
              "File Manager":consoleFileManager
              }
-localUser = consoleUserLogin()
+localUser = consoleUserLogin("dummyInput")
 if localUser == 0 :
     exit(500)
 while True:
-    mainFuncs[consoleMenu("basicUserMenu")](localUser)
+    if localUser != "dummyInput" and localUser != 0 :
+        uiParagraph("You are currently logged in as : " + localUser.username)
+        localUser = mainFuncs[consoleMenu("basicUserMenu")](localUser)
+    else : localUser = consoleUserLogin("dummyInput")
