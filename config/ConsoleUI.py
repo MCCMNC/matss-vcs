@@ -4,7 +4,6 @@ def clearConsole():
 def printCharLine(inputChar):
     print("\n" + inputChar * 50)
 def uiError(inputErrorType):
-    clearConsole()
     print("\n MAT VCS Ran into an " + inputErrorType + " Error")
 ## ADVANCED UI -----------------------------------------------------
 def uiParagraph(inputWrittenText): ## Displays any line of text into the console window
@@ -44,4 +43,9 @@ def uiUserInputPrompt(inputWrittenText):
     print("    -> ", end="")
     UserInput = input()
     clearConsole()
+    return UserInput
+def uiUserInputPromptNoCLS(inputWrittenText):
+    print(inputWrittenText)
+    print("    -> ", end="")
+    UserInput = input()
     return UserInput

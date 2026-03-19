@@ -6,6 +6,9 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
+
+User.objects.update(loginStatus=0)
+
 mainFuncs = {"Log out":consoleUserLogout,
              "File Manager":consoleFileManager
              }

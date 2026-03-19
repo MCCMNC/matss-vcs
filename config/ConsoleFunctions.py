@@ -52,14 +52,9 @@ def consoleUserProjectList(inputUser):
 
 def consoleUserAuditLog(inputUser):
     inputUserProjects = getUserProjects(inputUser)
-
     for currentProject in inputUserProjects:
         print(currentProject.title)
-
-        logs = AuditLog.objects.filter(project=currentProject).order_by("timestamp")
-        # Potential issue: no logs for a project → empty queryset
-
-        uiLogs(logs)
+        uiLogs(getProjectAuditLogs(currentProject))
 ## MENUS -----------------------------------------------------
 basicUserMenu = ["Log out","File Manager"]
 menuMap = {"basicUserMenu":basicUserMenu}
@@ -67,9 +62,21 @@ def consoleMenu(inputMenuType):
     print(inputMenuType)
     printCharLine("*")
     currentMenu = menuMap[inputMenuType]
-    for i in range(len(currentMenu)):
+    currentMenuLen = len(currentMenu)
+    for i in range(currentMenuLen):
         print(currentMenu[i] + " : "+ str(i))
-    return currentMenu[int(uiUserInputPrompt("Pick an Action"))]
+    currentUserInputInteger = 0
+    while 1 :
+        currentUserInput = uiUserInputPromptNoCLS("Pick an Action")
+        if currentUserInput.isdigit():
+            currentUserInputInteger = int(currentUserInput)
+        else:
+            uiError("Unexpected Input Type")
+            continue
+        if currentUserInputInteger < 0 or currentUserInputInteger >= currentMenuLen :
+            uiError("Unexpected Input Value")
+            continue
+        return currentMenu[currentUserInputInteger]
 
 def consoleFileManager(inputUser):
     while True:
@@ -113,11 +120,11 @@ def consoleFileManager(inputUser):
             for printedProjectVersion in printedProjectVersions:
                 print(f"Version Number: {printedProjectVersion.version_number}")
             currentProjectVersionSpecific = ProjectVersion.objects.get(version_number=input("Enter Project Version Number :"))
-            addFileToDB(inputUser,currentProjectVersionSpecific, currentFilePath, currentFileContent)
+            addVersionFileToDB(inputUser, currentProjectVersionSpecific, currentFilePath, currentFileContent)
             print("ADDED FILE TO DB AND CREATED AUDIT LOG SUCCESSFULLY")
         elif userChoice == "8": # Remove File from DB
             clearConsole()
-            removeFIleFromDB(inputUser,input("Enter File Path: "))
+            removeVersionFileFromDB(inputUser, input("Enter File Path: "))
             print("REMOVED FILE FROM DB AND CREATED AUDIT LOG SUCCESSFULLY")
         elif userChoice == "9": # manage version approval
             clearConsole()
@@ -130,8 +137,9 @@ def consoleFileManager(inputUser):
             for currentProjectVersion in currentProjectVersions:
                 uiProjectVersion(currentProjectVersion)
             currentInput = input("Please pick a version to approve ->")
-            approveProjectVersion(currentProjectVersions.get(version_number = currentInput),inputUser,currentProjectID)
-            print("APPROVED PROJECT VERSION AND CREATED AUDIT LOG SUCCESSFULLY")
+            if approveProjectVersion(currentProjectVersions.get(version_number = currentInput),inputUser,currentProjectID) :
+                print("APPROVED PROJECT VERSION AND CREATED AUDIT LOG SUCCESSFULLY")
+            else : print("PROJECT VERSION ALREADY APPROVED")
         elif userChoice == "0": #WIPES THE ENTIRE DB EXCEPT FOR USER DATA
             clearConsole()
             if input("Are you sure you want to wipe the entire DB excluding user data? Y/N")=="Y":

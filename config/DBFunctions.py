@@ -6,7 +6,12 @@ django.setup()
 
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 
-
+def getUserAuditLogs(inputUserID):
+        # Potential issue: no logs for a user → empty queryset
+    return AuditLog.objects.filter(user_id=inputUserID).order_by("timestamp")
+def getProjectAuditLogs(inputProjectID):
+        # Potential issue: no logs for a project → empty queryset
+    return AuditLog.objects.filter(project_id=inputProjectID).order_by("timestamp")
 
 def getProjectByID(inputProjectID):
     return Project.objects.get(pk=inputProjectID)
@@ -104,7 +109,7 @@ def logCreateVersionFile(inputUser,inputProjectVersionFile):
                 f"Version {inputProjectVersionFile.version.version_number}"
     )
 
-def addFileToDB(inputUser,inputVersion, inputPath, inputContent): ##PATHS SHOULD NOT COLLIDE
+def addVersionFileToDB(inputUser, inputVersion, inputPath, inputContent): ##PATHS SHOULD NOT COLLIDE
     currentVersionFile , _= VersionFile.objects.get_or_create(
         version_id = inputVersion.id,
         path = inputPath,
@@ -120,25 +125,36 @@ def logRemoveVersionFile(inputUser,inputProjectVersionFile):
         action = "REMOVE_VERSION_FILE",
         details = f"REMOVED {inputProjectVersionFile.path} FROM DB"
     )
-def removeFIleFromDB(inputUser,inputFilePath):
+def removeVersionFileFromDB(inputUser, inputFilePath):
     toBeDeletedFile = VersionFile.objects.get(path = inputFilePath)
     logRemoveVersionFile(inputUser,toBeDeletedFile)
     VersionFile.objects.get(path = inputFilePath).delete()
+def removeProjectFromDB():
+    return "CURRENTLY UNIMPLEMENTED"
+def removeProjectVersionFromDB():
+    return "CURRENTLY UNIMPLEMENTED"
 
 def userLogOut(inputUser):
     inputUser.loginStatus = False
     inputUser.save()
+
 def userLogIn(inputUser):
     inputUser.loginStatus = True
     inputUser.save()
+
 def approveProjectVersion(inputVersion, inputUser, inputProjectID):
     if inputVersion.status != "Approved":
         inputVersion.status = "Approved"
         inputVersion.save()
-        # Potential issue: inputVersion may be None or unsaved
-    returnedLog, _ = AuditLog.objects.get_or_create(
+        # Potential issue: inputVersion may be None
+    else : return 0
+    createdLog, _ = AuditLog.objects.get_or_create(
         user = inputUser,
         project_id = inputProjectID,
         action = "APPROVE_VERSION",
         details = f"{Project.objects.get(pk=inputProjectID).title} v{inputVersion.version_number} approved"
     )
+    return 1
+
+def editVersionFileToVersion():
+    return "CURRENTLY UNIMPLEMENTED"
