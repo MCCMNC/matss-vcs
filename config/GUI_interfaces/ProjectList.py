@@ -8,12 +8,6 @@ class ProjectListUI(QWidget):
 
         self.audit_log = QListWidget()
 
-        self.audit_log.addItems([
-            "placeholder",
-            "placeholder",
-            "placeholder"
-        ])
-
         self.repo_container = QWidget()
         self.repo_layout = QVBoxLayout()
 
@@ -32,6 +26,5 @@ class ProjectListUI(QWidget):
 
     def add_repository(self, repo_name):
         button = QPushButton(repo_name)
-        self.repo_layout.addWidget(button)
         self.repo_layout.addWidget(button)
         return button 
