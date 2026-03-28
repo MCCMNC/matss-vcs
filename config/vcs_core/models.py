@@ -17,8 +17,18 @@ class User(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     loginStatus = models.BooleanField(default=False)
 
-class Project(models.Model):
+class Repository(models.Model):
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    path = models.CharField(max_length=255, default="unknown")
 
+class Project(models.Model):
+    repository = models.ForeignKey(
+        Repository,
+        on_delete=models.CASCADE,
+        null=True,  # Critical: Allows existing projects to have no repo
+        blank=True  # Critical: Allows forms to be saved without a repo
+    )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
 
@@ -26,7 +36,7 @@ class Project(models.Model):
         User,
         on_delete=models.CASCADE
     )
-
+    path = models.CharField(max_length=255, default="unknown")
     created_at = models.DateTimeField(auto_now_add=True)
 
 
@@ -53,6 +63,8 @@ class ProjectVersion(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    path = models.CharField(max_length=255, default="unknown")
+
     class Meta:
         unique_together = ("project", "version_number")
 
@@ -61,7 +73,7 @@ class VersionFile(models.Model):
 
     version = models.ForeignKey(ProjectVersion, on_delete=models.CASCADE)
 
-    path = models.CharField(max_length=500)
+    path = models.CharField(max_length=255, default="unknown")
 
     content = models.TextField()
 

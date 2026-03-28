@@ -1,37 +1,28 @@
-from ConsoleUI import *
 from DBFunctions import *
 import os
 import django
-
+import PyQt6
+from PyQt6.QtWidgets import QMessageBox
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 
-def UserLogin(inputUser, localUserName, localPassword):
-    potentialUser = User.objects.filter(username = localUserName).first()  # Potential issue: if the username does not exist, potentialUser will be None
-    if potentialUser is None or potentialUser.password_hash != localPassword:
-        #return to gui incorrect login credentials
-        print("Incorrect login credentials")
-        return 0
-    if inputUser != "dummyInput" : userLogOut(inputUser)
+def guiUserLogin(inputUsername,inputPassword):
+    potentialUser = User.objects.filter(username = inputUsername).first() # Potential issue: if the username does not exist, potentialUser will be None
+    if potentialUser is None or potentialUser.password_hash != inputPassword:
+        return None
     userLogIn(potentialUser)
-    print("Logged in as" , potentialUser)
     return potentialUser
 
-def UserLogout(inputUser):
-    inputUser.refresh_from_db()
-    if inputUser.loginStatus:
-        userLogOut(inputUser)
-        # return to gui Successfully logged out from " + inputUser.username
-    elif not inputUser.loginStatus :
-        # return to gui Already logged out
-        print()
-    return "dummyInput"
-
-def UserAuditLog(inputUser):
-    inputUserProjects = getUserProjects(inputUser)
-    for currentProject in inputUserProjects:
-        print(currentProject.title)
-        uiLogs(getProjectAuditLogs(currentProject))
-        AuditLog.objects.filter(project_id=currentProject).order_by("timestamp")
+def auditLogToText(entry):
+    return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.project.title})"
+def auditLogToTextExtended(entry):
+    return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.user.username} {entry.action} ({entry.project.title})"
+def auditLogToTextExpanded(entry):
+    return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.user.username} {entry.action} ({entry.project.title} {entry.details})"
+def guiErrorBox(parent,inputErrorStr):
+    msg = QMessageBox(parent)
+    msg.setWindowTitle("Error")
+    msg.setText("MAT VCS ran into an "+inputErrorStr+" Error")
+    msg.exec()

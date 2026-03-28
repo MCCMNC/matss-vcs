@@ -4,7 +4,7 @@ import django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
+from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog, Repository
 
 def getUserAuditLogs(inputUserID):
         # Potential issue: no logs for a user → empty queryset
@@ -56,15 +56,16 @@ def logCreateProject(inputUser,inputProject):
         user_id=inputUser.pk,
         project_id = inputProject.pk,
         action="CREATE_PROJECT",
-        details=f"ADDED {inputProject.title} to DB"
+        details=f"ADDED {inputProject.title} to {inputProject.repository.title}"
     )
 
-def addProjectToDB(inputTitle, inputDescription, inputOwner):
+def addProjectToDB(inputTitle, inputDescription, inputOwner,inputRepo):
     currentProject, _ = Project.objects.get_or_create(
         title=inputTitle,
         defaults={
             "description": inputDescription,
-            "owner": inputOwner
+            "owner": inputOwner,
+            "repository" : inputRepo
         }
     )
     # Potential issue: title may not be unique → existing project may be reused
@@ -79,7 +80,7 @@ def logCreateProjectVersion(inputUser, inputProject, inputVersion):
     )
     # Potential issue: duplicate logs if uniqueness is not enforced
 
-def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage):
+def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage,inputPath):
     latest = (
         ProjectVersion.objects
         .filter(project_id=inputProject.pk)
@@ -91,12 +92,13 @@ def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage):
     currentVersion, _ = ProjectVersion.objects.get_or_create(
         project=inputProject,
         version_number=nextVersion,
+        path=inputPath, # Potential issue : duplicate paths with something in DB
         defaults={
             "author": inputAuthor,
             "message": inputMessage
         }
-    )
-    # Potential issue: race condition → duplicate version numbers possible
+    ) # Potential issue: race condition → duplicate version numbers possible
+
     logCreateProjectVersion(inputAuthor,inputProject,currentVersion)
 
 def logCreateVersionFile(inputUser,inputProjectVersionFile):
@@ -158,3 +160,16 @@ def approveProjectVersion(inputVersion, inputUser, inputProjectID):
 
 def editVersionFileToVersion():
     return "CURRENTLY UNIMPLEMENTED"
+def getAllRepos():
+    return Repository.objects.all()
+def getUserRepos(inputUser):
+    # Potential issue: if user is None or not a valid User instance, this will return an empty queryset
+    return Repository.objects.filter(project__owner=inputUser).distinct()
+def getRepoProjectsByRepoName(repo_name):
+    # This looks at the 'title' field of the related Repository model
+    return Project.objects.filter(repository__title=repo_name)
+def getRepoAuditLogsByRepoName(repo_name):
+    # This reaches: AuditLog -> Project -> Repository -> title
+    return AuditLog.objects.filter(
+        project__repository__title__iexact=repo_name
+    ).order_by('timestamp')
