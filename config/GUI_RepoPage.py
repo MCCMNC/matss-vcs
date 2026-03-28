@@ -2,7 +2,8 @@ import os
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QListWidget, QListWidgetItem, QFrame
+    QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
+    QMessageBox
 )
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from GUIFunctions import *
@@ -27,23 +28,23 @@ SCROLLBAR_STYLE = """
 
 
 class RepoPage(QWidget):
-    def __init__(self, loginUser, repo_name, back_callback, pfp_pixmap=None):
+    def __init__(self, loginUser, repo_name, back_callback, logout_callback, pfp_pixmap=None):
         super().__init__()
         self.user = loginUser
         self.repo_name = repo_name
         self.back_callback = back_callback
+        self.logout_callback = logout_callback
         self.pfp_pixmap = pfp_pixmap
         self.is_expanded = False
-        self.original_logs = []  # Restored for expansion logic
+        self.original_logs = []
         self._is_toggling = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"RepoPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
 
-        # Main Layout - Locked alignment
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(20, 20, 20, 20)
-        self.main_layout.setSpacing(10)
+        self.main_layout.setSpacing(0)
         self.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # -------------------- Top Bar (LOCKED 70px) --------------------
@@ -52,8 +53,9 @@ class RepoPage(QWidget):
         top_bar_layout = QHBoxLayout(top_bar_container)
         top_bar_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 1. Left
+        # 1. Left (350px)
         self.left_section = QWidget()
+        self.left_section.setFixedWidth(350)
         left_layout = QHBoxLayout(self.left_section)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -71,27 +73,25 @@ class RepoPage(QWidget):
         left_layout.addWidget(self.user_label)
 
         # 2. Middle
-        self.repo_label = QLabel(self.repo_name)
-        self.repo_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        self.repo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        guiSetTopLabel(self,self.repo_name)
 
-        # 3. Right
+        # 3. Right (350px)
         self.right_section = QWidget()
+        self.right_section.setFixedWidth(350)
         right_layout = QHBoxLayout(self.right_section)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.back_btn = QPushButton("Go Back")
-        self.back_btn.setFixedSize(100, 35)
-        self.back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.back_btn.setStyleSheet(
+        self.logout_btn = QPushButton("Log Out")
+        self.logout_btn.setFixedSize(100, 35)
+        self.logout_btn.setStyleSheet(
             "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.back_btn.clicked.connect(self.back_callback)
-        right_layout.addWidget(self.back_btn)
+        self.logout_btn.clicked.connect(self.confirm_logout)
+        right_layout.addWidget(self.logout_btn)
 
-        top_bar_layout.addWidget(self.left_section, 1)
-        top_bar_layout.addWidget(self.repo_label, 1)
-        top_bar_layout.addWidget(self.right_section, 1)
+        top_bar_layout.addWidget(self.left_section)
+        top_bar_layout.addWidget(self.page_title, 1)
+        top_bar_layout.addWidget(self.right_section)
         self.main_layout.addWidget(top_bar_container)
 
         # -------------------- Middle Layout --------------------
@@ -99,47 +99,21 @@ class RepoPage(QWidget):
         self.middle_layout.setContentsMargins(0, 0, 0, 0)
         self.middle_layout.setSpacing(0)
 
-        # Audit (Fixed 350)
-        self.audit_container = QWidget()
-        self.audit_container.setFixedWidth(350)
-        audit_v_layout = QVBoxLayout(self.audit_container)
-        audit_v_layout.setContentsMargins(0, 10, 10, 10)
-
-        self.audit_label = QLabel(f"Audit Log for : {self.repo_name}")
-        self.audit_list = QListWidget()
-        self.audit_list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.audit_list.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        self.audit_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.audit_list.setStyleSheet(
-            f"QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #b9c2c9; outline: none; }} {SCROLLBAR_STYLE}")
-
-        repo_logs = getRepoAuditLogsByRepoName(self.repo_name)
-        log_font = QFont("Arial", 8)
-        for log in reversed(repo_logs):
-            text = auditLogToText(log)
-            self.original_logs.append(text)  # Store for shrinking back
-            item = QListWidgetItem(text)
-            item.setFont(log_font)
-            self.audit_list.addItem(item)
-
-        self.expand_btn = QPushButton("Expand Audit Log")
-        self.expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.expand_btn.setStyleSheet(
-            "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; padding: 10px; font-weight: bold;")
-        self.expand_btn.clicked.connect(self.handle_audit_toggle)
-
-        audit_v_layout.addWidget(self.audit_label)
-        audit_v_layout.addWidget(self.audit_list)
-        audit_v_layout.addWidget(self.expand_btn)
-
-        # Center (List)
+        # Audit (Left - Fixed 350)
+        guiSetAuditLog(self,"Repo")
+        # Center Column
         self.center_container = QWidget()
         center_v_layout = QVBoxLayout(self.center_container)
-        center_v_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        center_v_layout.setContentsMargins(0, 10, 0, 10)
+        center_v_layout.setSpacing(10) # Space between List and Button
+        center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
 
+        # 1. Project List
         project_box = QWidget()
         project_box.setFixedSize(500, 500)
         project_v = QVBoxLayout(project_box)
+        project_v.setContentsMargins(0, 0, 0, 0)
+
         self.project_list = QListWidget()
         self.project_list.setStyleSheet(
             f"QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #dce1e6; }} {SCROLLBAR_STYLE}")
@@ -150,9 +124,18 @@ class RepoPage(QWidget):
 
         project_v.addWidget(QLabel("List of Projects :"))
         project_v.addWidget(self.project_list)
+
         center_v_layout.addWidget(project_box)
 
-        # Right (Fixed 350)
+        # 2. Go Back Button (Now safely underneath)
+        self.back_btn = QPushButton("Go Back")
+        self.back_btn.setFixedSize(120, 30)
+        self.back_btn.setStyleSheet(
+            "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
+        self.back_btn.clicked.connect(self.back_callback)
+        center_v_layout.addWidget(self.back_btn)
+
+        # Right Spacer
         self.right_spacer = QWidget()
         self.right_spacer.setFixedWidth(350)
 
@@ -161,35 +144,18 @@ class RepoPage(QWidget):
         self.middle_layout.addWidget(self.right_spacer)
         self.main_layout.addLayout(self.middle_layout)
 
+    def confirm_logout(self):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Confirm Log Out")
+        msg_box.setText("Are you sure you want to log out?")
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg_box.setStyleSheet(
+            "QMessageBox { background-color: #0d0e0f; } "
+            "QLabel { color: #b9c2c9; } "
+            "QPushButton { background-color: #151719; color: #b9c2c9; border: 1px solid #30363d; padding: 5px; min-width: 80px; }")
+
+        if msg_box.exec() == QMessageBox.StandardButton.Yes:
+            self.logout_callback()
+
     def handle_audit_toggle(self):
-        if self._is_toggling: return
-        self._is_toggling = True
-
-        if not self.is_expanded:
-            self.audit_container.setFixedWidth(self.width() - 40)
-            self.center_container.hide()
-            self.right_spacer.hide()
-
-            # Switch to Expanded Text
-            repo_logs = getRepoAuditLogsByRepoName(self.repo_name)
-            for i, log in enumerate(reversed(repo_logs)):
-                if i < self.audit_list.count():
-                    text = auditLogToTextExpanded(log)
-                    self.audit_list.item(i).setText(text)
-
-            self.expand_btn.setText("Minimise Audit Log")
-            self.is_expanded = True
-        else:
-            self.audit_container.setFixedWidth(350)
-            self.center_container.show()
-            self.right_spacer.show()
-
-            # Switch back to Original Text
-            for i in range(self.audit_list.count()):
-                if i < len(self.original_logs):
-                    self.audit_list.item(i).setText(self.original_logs[i])
-
-            self.expand_btn.setText("Expand Audit Log")
-            self.is_expanded = False
-
-        self._is_toggling = False
+        guiExpandAuditLog(self,"Repo")
