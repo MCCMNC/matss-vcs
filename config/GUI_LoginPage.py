@@ -35,7 +35,7 @@ class LoginPage(QWidget):
         logo_path = os.path.join(BASE_DIR, "Assets", "MAT Software Solutions Logo.png")
 
         self.logo = QLabel()
-        self.logo.setFixedSize(160, 160) # Slightly smaller for the 480 width
+        self.logo.setFixedSize(320, 320) # Slightly smaller for the 480 width
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         pixmap = QPixmap(logo_path)

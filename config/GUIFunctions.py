@@ -2,13 +2,14 @@ from DBFunctions import *
 import os
 import django
 import PyQt6
-from PyQt6.QtWidgets import QMessageBox
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QMessageBox, QFileIconProvider
+from PyQt6.QtCore import Qt, QFileInfo
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
     QMessageBox
 )
+from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QLineEdit, QListWidget
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
@@ -150,3 +151,43 @@ def guiExpandAuditLog(inputWidget, inputInstruction):
 
     inputWidget.is_expanded = expand
     inputWidget._is_toggling = False
+
+def getItemIcons(inputDBElements, inputItemsType):
+    returnedIcons = []
+    icon_provider = QFileIconProvider()
+    for item in inputDBElements:
+        file_info = QFileInfo(getElementFullPath(item,inputItemsType))
+        native_icon = icon_provider.icon(file_info)
+        returnedIcons.append(native_icon)
+    return returnedIcons
+def formatWidgetSlashes(inputWidget):
+    """
+    Recursively finds all text-bearing elements within a widget
+    and adds spaces around any '/' characters.
+    """
+    # Define which widgets we want to target and how to get/set their text
+    # This covers the most common types in your current project
+    for child in inputWidget.findChildren(QWidget):
+
+        # Handle Labels, Buttons, and LineEdits
+        if isinstance(child, (QLabel, QPushButton, QLineEdit)):
+            current_text = child.text()
+            if "/" in current_text:
+                # Replace "/" with " / " but prevent double-spacing if it's already there
+                new_text = current_text.replace("/", " / ").replace("  /  ", " / ")
+                child.setText(new_text.strip())
+
+        # Handle List Widgets (like your Project or Audit lists)
+        elif isinstance(child, QListWidget):
+            for i in range(child.count()):
+                item = child.item(i)
+                current_text = item.text()
+                if "/" in current_text:
+                    new_text = current_text.replace("/", " / ").replace("  /  ", " / ")
+                    item.setText(new_text.strip())
+
+        # If the child is a container, the findChildren call already
+        # handles the recursion, but you can manually recurse if needed.
+
+def formatWidget(inputWidget):
+    formatWidgetSlashes(inputWidget)

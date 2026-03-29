@@ -30,26 +30,26 @@ def getItemIcons(inputDBElements, inputItemsType):
     returnedIcons = []
     icon_provider = QFileIconProvider()
     for item in inputDBElements:
-        file_info = QFileInfo(getElementFullPath(item,inputItemsType))
+        file_info = QFileInfo(getElementFullPath(item, inputItemsType))
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
     return returnedIcons
 
-class RepoPage(QWidget):
-    def __init__(self, loginUser, repo_name, back_callback, logout_callback, project_callback, pfp_pixmap=None):
+class ProjectPage(QWidget):
+    def __init__(self, loginUser, project_data, back_to_repo_callback, logout_callback, pfp_pixmap=None):
         super().__init__()
         self.user = loginUser
-        self.repo_name = repo_name
-        self.back_callback = back_callback
+        self.project_data = project_data
+        self.back_callback = back_to_repo_callback
         self.logout_callback = logout_callback
-        self.project_callback = project_callback  # New callback for navigation
         self.pfp_pixmap = pfp_pixmap
         self.is_expanded = False
         self.original_logs = []
         self._is_toggling = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setStyleSheet(f"RepoPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
+        # Style matched to RepoPage baseline
+        self.setStyleSheet(f"ProjectPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
 
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(20, 20, 20, 20)
@@ -80,7 +80,7 @@ class RepoPage(QWidget):
         left_layout.addWidget(self.pfp)
         left_layout.addWidget(self.user_label)
 
-        guiSetTopLabel(self, getElementFullPath(getRepoByName(self.repo_name), "Repository"))
+        guiSetTopLabel(self, getElementFullPath(self.project_data, "Project"))
 
         self.right_section = QWidget()
         self.right_section.setFixedWidth(350)
@@ -105,7 +105,7 @@ class RepoPage(QWidget):
         self.middle_layout.setContentsMargins(0, 0, 0, 0)
         self.middle_layout.setSpacing(0)
 
-        guiSetAuditLog(self, "Repo")
+        guiSetAuditLog(self, "Dashboard")
 
         self.center_container = QWidget()
         center_v_layout = QVBoxLayout(self.center_container)
@@ -113,34 +113,34 @@ class RepoPage(QWidget):
         center_v_layout.setSpacing(10)
         center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
 
-        project_box = QWidget()
-        project_box.setFixedSize(500, 500)
-        project_v = QVBoxLayout(project_box)
-        project_v.setContentsMargins(0, 0, 0, 0)
+        # Project Detail Box (Sizes matched to RepoPage)
+        projectVersionBox = QWidget()
+        projectVersionBox.setFixedSize(500, 500)
+        detail_v = QVBoxLayout(projectVersionBox)
+        detail_v.setContentsMargins(0, 0, 0, 0)
 
-        self.project_list = QListWidget()
-        self.project_list.setStyleSheet(
+        detail_v.addWidget(QLabel(f"Viewing Details for: {self.project_data.title}"))
+
+        self.projectVersionList = QListWidget()
+        # Stylesheet logic synced with RepoPage baseline
+        self.projectVersionList.setStyleSheet(
             f"""QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #dce1e6; }} 
                QListWidget::item {{ padding: 5px; }}
                {SCROLLBAR_STYLE}""")
-        self.project_list.setIconSize(QSize(20, 20))
+        self.projectVersionList.setIconSize(QSize(20, 20))
 
-        # --- Navigate to Project Page on click ---
-        self.project_list.itemClicked.connect(self.handle_project_click)
+        # --- Populate Versions ---
+        self.projectVersionData = getProjectVersionsByProjectID(self.project_data.id)
+        version_icons = getItemIcons(self.projectVersionData, "ProjectVersion")
 
-        # --- Populate Projects using custom getItemIcons function ---
-        self.projects_data = getRepoProjectsByRepoName(self.repo_name)
-        project_icons = getItemIcons(self.projects_data, "Project")
-
-        for p, icon in zip(self.projects_data, project_icons):
-            item = QListWidgetItem(f"{p.title} - {p.path}")
+        for p, icon in zip(self.projectVersionData, version_icons):
+            item = QListWidgetItem(f"{p.version_number} - {p.path}")
             item.setIcon(icon)
             item.setData(Qt.ItemDataRole.UserRole, p)
-            self.project_list.addItem(item)
+            self.projectVersionList.addItem(item)
 
-        project_v.addWidget(QLabel("List of Projects :"))
-        project_v.addWidget(self.project_list)
-        center_v_layout.addWidget(project_box)
+        detail_v.addWidget(self.projectVersionList)
+        center_v_layout.addWidget(projectVersionBox)
 
         self.back_btn = QPushButton("Go Back")
         self.back_btn.setFixedSize(120, 30)
@@ -159,12 +159,6 @@ class RepoPage(QWidget):
 
         formatWidget(self)
 
-    def handle_project_click(self, item):
-        project = item.data(Qt.ItemDataRole.UserRole)
-        if project:
-            # Trigger the callback to MainWindow to swap to ProjectPage
-            self.project_callback(project)
-
     def confirm_logout(self):
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Confirm Log Out")
@@ -174,9 +168,8 @@ class RepoPage(QWidget):
             "QMessageBox { background-color: #0d0e0f; } "
             "QLabel { color: #b9c2c9; } "
             "QPushButton { background-color: #151719; color: #b9c2c9; border: 1px solid #30363d; padding: 5px; min-width: 80px; }")
-
         if msg_box.exec() == QMessageBox.StandardButton.Yes:
             self.logout_callback()
 
     def handle_audit_toggle(self):
-        guiExpandAuditLog(self, "Repo")
+        guiExpandAuditLog(self, "Dashboard")

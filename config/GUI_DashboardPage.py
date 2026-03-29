@@ -1,9 +1,9 @@
 import os
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QFileInfo, QSize
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
-    QMessageBox
+    QMessageBox, QFileIconProvider
 )
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from GUIFunctions import *
@@ -27,6 +27,16 @@ SCROLLBAR_STYLE = """
 """
 
 
+def getItemIcons(inputDBElements, inputItemsType):
+    returnedIcons = []
+    icon_provider = QFileIconProvider()
+    for item in inputDBElements:
+        file_info = QFileInfo(getElementFullPath(item, inputItemsType))
+        native_icon = icon_provider.icon(file_info)
+        returnedIcons.append(native_icon)
+    return returnedIcons
+
+
 class DashboardPage(QWidget):
     def __init__(self, loginUser, on_repo_selected, on_logout):
         super().__init__()
@@ -46,13 +56,12 @@ class DashboardPage(QWidget):
         self.main_layout.setSpacing(0)
         self.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # -------------------- Top Bar (LOCKED 70px) --------------------
+        # -------------------- Top Bar --------------------
         top_bar_container = QWidget()
         top_bar_container.setFixedHeight(70)
         top_bar_layout = QHBoxLayout(top_bar_container)
         top_bar_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 1. Left (350px)
         self.left_section = QWidget()
         self.left_section.setFixedWidth(350)
         left_layout = QHBoxLayout(self.left_section)
@@ -77,11 +86,8 @@ class DashboardPage(QWidget):
         left_layout.addWidget(self.pfp)
         left_layout.addWidget(self.user_label)
 
-        # 2. Middle
+        guiSetTopLabel(self, "Dashboard")
 
-        guiSetTopLabel(self,"Dashboard")
-
-        # 3. Right (350px)
         self.right_section = QWidget()
         self.right_section.setFixedWidth(350)
         right_layout = QHBoxLayout(self.right_section)
@@ -105,34 +111,40 @@ class DashboardPage(QWidget):
         self.middle_layout.setContentsMargins(0, 0, 0, 0)
         self.middle_layout.setSpacing(0)
 
-        # Audit (Fixed 350)
-        guiSetAuditLog(self,"Dashboard")
-        # Center Column
+        guiSetAuditLog(self, "Dashboard")
+
         self.center_container = QWidget()
         center_v_layout = QVBoxLayout(self.center_container)
-        # CHANGED: Alignment to Top so the list shifts up
         center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
-        # CHANGED: Added top margin (10) to match the vertical start of the audit log
-        center_v_layout.setContentsMargins(0, 10, 0, 0)
+        center_v_layout.setSpacing(10)
+        center_v_layout.setContentsMargins(0, 10, 0, 10)
 
         repo_box = QWidget()
         repo_box.setFixedSize(500, 500)
         repo_v = QVBoxLayout(repo_box)
-        repo_v.setContentsMargins(0, 0, 0, 0)  # Tighten internal list margins
+        repo_v.setContentsMargins(0, 0, 0, 0)
 
         self.repo_list = QListWidget()
+        # Stylesheet logic synced with RepoPage baseline
         self.repo_list.setStyleSheet(
-            f"QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #dce1e6; }} {SCROLLBAR_STYLE}")
+            f"""QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #dce1e6; }} 
+               QListWidget::item {{ padding: 5px; }}
+               {SCROLLBAR_STYLE}""")
+        self.repo_list.setIconSize(QSize(20, 20))
         self.repo_list.itemClicked.connect(self.handle_repo_selection)
 
-        for repo in getUserRepos(self.user):
-            self.repo_list.addItem(f"{repo.title} - {repo.path}")
+        repos = getUserRepos(self.user)
+        repo_icons = getItemIcons(repos, "Repository")
+
+        for repo, icon in zip(repos, repo_icons):
+            item = QListWidgetItem(f"{repo.title} - {repo.path}")
+            item.setIcon(icon)
+            self.repo_list.addItem(item)
 
         repo_v.addWidget(QLabel("List of Repositories :"))
         repo_v.addWidget(self.repo_list)
         center_v_layout.addWidget(repo_box)
 
-        # Right (350px)
         self.right_spacer = QWidget()
         self.right_spacer.setFixedWidth(350)
 
@@ -140,6 +152,8 @@ class DashboardPage(QWidget):
         self.middle_layout.addWidget(self.center_container, 1)
         self.middle_layout.addWidget(self.right_spacer)
         self.main_layout.addLayout(self.middle_layout)
+
+        formatWidget(self)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -165,4 +179,4 @@ class DashboardPage(QWidget):
         self.on_repo_selected(name)
 
     def handle_audit_toggle(self):
-        guiExpandAuditLog(self,"Dashboard")
+        guiExpandAuditLog(self, "Dashboard")

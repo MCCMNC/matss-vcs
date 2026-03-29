@@ -173,3 +173,15 @@ def getRepoAuditLogsByRepoName(repo_name):
     return AuditLog.objects.filter(
         project__repository__title__iexact=repo_name
     ).order_by('timestamp')
+def getRepoByName(inputRepoName):
+    return Repository.objects.get(title=inputRepoName)
+
+def getElementFullPath(inputElement,inputType):
+    returnedString = "UNKNOWN ELEMENT"
+    if inputType=="Repository":
+        returnedString = inputElement.path
+    elif inputType=="Project":
+        returnedString = f"{inputElement.repository.path}/{inputElement.path}"
+    elif inputType=="ProjectVersion":
+        returnedString = f"{inputElement.project.repository.path}/{inputElement.path}"
+    return returnedString
