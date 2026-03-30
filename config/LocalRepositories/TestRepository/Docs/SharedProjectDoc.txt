@@ -1,0 +1,1 @@
+this is a project doc meant to be shared across project versions ; edited from version 1

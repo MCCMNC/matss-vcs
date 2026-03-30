@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from GUIFunctions import *
 from DBFunctions import *
+from GUI_FileItemWidget import FileItemWidget # Import the custom widget
 
 SCROLLBAR_STYLE = """
     QScrollBar:vertical {
@@ -30,7 +31,7 @@ def getItemIcons(inputDBElements, inputItemsType):
     returnedIcons = []
     icon_provider = QFileIconProvider()
     for item in inputDBElements:
-        file_info = QFileInfo(getElementFullPath(item,inputItemsType))
+        file_info = QFileInfo(getElementRelativePath(item, inputItemsType))
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
     return returnedIcons
@@ -42,7 +43,7 @@ class RepoPage(QWidget):
         self.repo_name = repo_name
         self.back_callback = back_callback
         self.logout_callback = logout_callback
-        self.project_callback = project_callback  # New callback for navigation
+        self.project_callback = project_callback
         self.pfp_pixmap = pfp_pixmap
         self.is_expanded = False
         self.original_logs = []
@@ -80,7 +81,7 @@ class RepoPage(QWidget):
         left_layout.addWidget(self.pfp)
         left_layout.addWidget(self.user_label)
 
-        guiSetTopLabel(self, getElementFullPath(getRepoByName(self.repo_name), "Repository"))
+        guiSetTopLabel(self, getElementRelativePath(getRepoByName(self.repo_name), "Repository"), 18)
 
         self.right_section = QWidget()
         self.right_section.setFixedWidth(350)
@@ -88,12 +89,7 @@ class RepoPage(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.logout_btn = QPushButton("Log Out")
-        self.logout_btn.setFixedSize(100, 35)
-        self.logout_btn.setStyleSheet(
-            "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.logout_btn.clicked.connect(self.confirm_logout)
-        right_layout.addWidget(self.logout_btn)
+        guiAddLogoutButton(self, right_layout, self.logout_callback)
 
         top_bar_layout.addWidget(self.left_section)
         top_bar_layout.addWidget(self.page_title, 1)
@@ -114,29 +110,42 @@ class RepoPage(QWidget):
         center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
 
         project_box = QWidget()
-        project_box.setFixedSize(500, 500)
         project_v = QVBoxLayout(project_box)
         project_v.setContentsMargins(0, 0, 0, 0)
 
         self.project_list = QListWidget()
+        self.project_list.setMinimumSize(500, 400)
+        # Enable mouse tracking for the hover buttons to work
+        self.project_list.setMouseTracking(True)
         self.project_list.setStyleSheet(
-            f"""QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #dce1e6; }} 
-               QListWidget::item {{ padding: 5px; }}
-               {SCROLLBAR_STYLE}""")
-        self.project_list.setIconSize(QSize(20, 20))
+            f"""
+            QListWidget {{ 
+                border: 1px solid #0d1115; 
+                background: rgba(255,255,255,0.02); 
+                color: #dce1e6; 
+                outline: none; 
+            }} 
+            QListWidget::item:hover, QListWidget::item:selected {{ 
+                background: transparent; 
+            }}
+            QListWidget::item {{ 
+                padding: 0px; 
+            }}
+            {SCROLLBAR_STYLE}
+            """
+        )
 
-        # --- Navigate to Project Page on click ---
-        self.project_list.itemClicked.connect(self.handle_project_click)
-
-        # --- Populate Projects using custom getItemIcons function ---
+        # Populate using the custom FileItemWidget
         self.projects_data = getRepoProjectsByRepoName(self.repo_name)
         project_icons = getItemIcons(self.projects_data, "Project")
 
         for p, icon in zip(self.projects_data, project_icons):
-            item = QListWidgetItem(f"{p.title} - {p.path}")
-            item.setIcon(icon)
-            item.setData(Qt.ItemDataRole.UserRole, p)
+            item = QListWidgetItem(self.project_list)
+            item.setSizeHint(QSize(0, 40))
+            # Use context_type="Repository" to get the blue Follow button
+            custom_widget = FileItemWidget(p, icon, self, context_type="Repository")
             self.project_list.addItem(item)
+            self.project_list.setItemWidget(item, custom_widget)
 
         project_v.addWidget(QLabel("List of Projects :"))
         project_v.addWidget(self.project_list)
@@ -159,24 +168,41 @@ class RepoPage(QWidget):
 
         formatWidget(self)
 
-    def handle_project_click(self, item):
-        project = item.data(Qt.ItemDataRole.UserRole)
-        if project:
-            # Trigger the callback to MainWindow to swap to ProjectPage
-            self.project_callback(project)
+    def showEvent(self, event):
+        """Triggered every time the user navigates back to this Repo page."""
+        super().showEvent(event)
+        try:
+            # 1. Refresh the Audit Log for the Repo
+            guiSetAuditLog(self, "Repo")
 
-    def confirm_logout(self):
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Confirm Log Out")
-        msg_box.setText("Are you sure you want to log out?")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        msg_box.setStyleSheet(
-            "QMessageBox { background-color: #0d0e0f; } "
-            "QLabel { color: #b9c2c9; } "
-            "QPushButton { background-color: #151719; color: #b9c2c9; border: 1px solid #30363d; padding: 5px; min-width: 80px; }")
+            # 2. Refresh the Project List
+            self.refresh_project_list()
+        except Exception as e:
+            print(f"RepoPage refresh failed: {e}")
 
-        if msg_box.exec() == QMessageBox.StandardButton.Yes:
-            self.logout_callback()
+    def refresh_project_list(self):
+        """Clears and repopulates the project list from the database."""
+        self.project_list.clear()
+
+        # Fetch fresh data
+        self.projects_data = getRepoProjectsByRepoName(self.repo_name)
+        project_icons = getItemIcons(self.projects_data, "Project")
+
+        for p, icon in zip(self.projects_data, project_icons):
+            item = QListWidgetItem(self.project_list)
+            item.setSizeHint(QSize(0, 40))
+
+            # Re-create the custom widget with the new data
+            custom_widget = FileItemWidget(p, icon, self, context_type="Repository")
+
+            self.project_list.addItem(item)
+            self.project_list.setItemWidget(item, custom_widget)
+    # -------------------- Handlers --------------------
+
+    def handle_follow(self, project_obj):
+        """Replacement for the old click functionality"""
+        if project_obj:
+            self.project_callback(project_obj)
 
     def handle_audit_toggle(self):
         guiExpandAuditLog(self, "Repo")

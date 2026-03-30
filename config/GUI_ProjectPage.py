@@ -3,11 +3,12 @@ from PyQt6.QtCore import Qt, QFileInfo, QSize
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
-    QMessageBox, QFileIconProvider
+    QMessageBox, QFileIconProvider, QInputDialog
 )
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from GUIFunctions import *
 from DBFunctions import *
+from GUI_FileItemWidget import FileItemWidget
 
 SCROLLBAR_STYLE = """
     QScrollBar:vertical {
@@ -26,29 +27,31 @@ SCROLLBAR_STYLE = """
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 """
 
+
 def getItemIcons(inputDBElements, inputItemsType):
     returnedIcons = []
     icon_provider = QFileIconProvider()
     for item in inputDBElements:
-        file_info = QFileInfo(getElementFullPath(item, inputItemsType))
+        file_info = QFileInfo(getElementRelativePath(item, inputItemsType))
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
     return returnedIcons
 
+
 class ProjectPage(QWidget):
-    def __init__(self, loginUser, project_data, back_to_repo_callback, logout_callback, pfp_pixmap=None):
+    def __init__(self, loginUser, project_data, back_to_repo_callback, logout_callback, version_callback,
+                 pfp_pixmap=None):
         super().__init__()
         self.user = loginUser
         self.project_data = project_data
         self.back_callback = back_to_repo_callback
         self.logout_callback = logout_callback
+        self.version_callback = version_callback
         self.pfp_pixmap = pfp_pixmap
         self.is_expanded = False
-        self.original_logs = []
-        self._is_toggling = False
 
+        self.setAcceptDrops(True)  # Enable at page level but filter in the drop event
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        # Style matched to RepoPage baseline
         self.setStyleSheet(f"ProjectPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
 
         self.main_layout = QVBoxLayout(self)
@@ -80,7 +83,7 @@ class ProjectPage(QWidget):
         left_layout.addWidget(self.pfp)
         left_layout.addWidget(self.user_label)
 
-        guiSetTopLabel(self, getElementFullPath(self.project_data, "Project"))
+        guiSetTopLabel(self, getElementRelativePath(self.project_data, "Project"), 18)
 
         self.right_section = QWidget()
         self.right_section.setFixedWidth(350)
@@ -88,12 +91,7 @@ class ProjectPage(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.logout_btn = QPushButton("Log Out")
-        self.logout_btn.setFixedSize(100, 35)
-        self.logout_btn.setStyleSheet(
-            "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.logout_btn.clicked.connect(self.confirm_logout)
-        right_layout.addWidget(self.logout_btn)
+        guiAddLogoutButton(self, right_layout, self.logout_callback)
 
         top_bar_layout.addWidget(self.left_section)
         top_bar_layout.addWidget(self.page_title, 1)
@@ -105,7 +103,7 @@ class ProjectPage(QWidget):
         self.middle_layout.setContentsMargins(0, 0, 0, 0)
         self.middle_layout.setSpacing(0)
 
-        guiSetAuditLog(self, "Dashboard")
+        guiSetAuditLog(self, "Project")
 
         self.center_container = QWidget()
         center_v_layout = QVBoxLayout(self.center_container)
@@ -113,31 +111,30 @@ class ProjectPage(QWidget):
         center_v_layout.setSpacing(10)
         center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
 
-        # Project Detail Box (Sizes matched to RepoPage)
         projectVersionBox = QWidget()
-        projectVersionBox.setFixedSize(500, 500)
         detail_v = QVBoxLayout(projectVersionBox)
         detail_v.setContentsMargins(0, 0, 0, 0)
 
-        detail_v.addWidget(QLabel(f"Viewing Details for: {self.project_data.title}"))
+        detail_v.addWidget(QLabel(f"Viewing versions of : {self.project_data.title}"))
 
         self.projectVersionList = QListWidget()
-        # Stylesheet logic synced with RepoPage baseline
+        self.projectVersionList.setMinimumSize(500, 400)
+        self.projectVersionList.setMouseTracking(True)
         self.projectVersionList.setStyleSheet(
-            f"""QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #dce1e6; }} 
-               QListWidget::item {{ padding: 5px; }}
-               {SCROLLBAR_STYLE}""")
-        self.projectVersionList.setIconSize(QSize(20, 20))
+            f"""
+            QListWidget {{ 
+                border: 1px solid #0d1115; 
+                background: rgba(255,255,255,0.02); 
+                color: #dce1e6; 
+                outline: none; 
+            }} 
+            QListWidget::item:hover, QListWidget::item:selected {{ background: transparent; }}
+            QListWidget::item {{ padding: 0px; }}
+            {SCROLLBAR_STYLE}
+            """
+        )
 
-        # --- Populate Versions ---
-        self.projectVersionData = getProjectVersionsByProjectID(self.project_data.id)
-        version_icons = getItemIcons(self.projectVersionData, "ProjectVersion")
-
-        for p, icon in zip(self.projectVersionData, version_icons):
-            item = QListWidgetItem(f"{p.version_number} - {p.path}")
-            item.setIcon(icon)
-            item.setData(Qt.ItemDataRole.UserRole, p)
-            self.projectVersionList.addItem(item)
+        self.refresh_version_list()
 
         detail_v.addWidget(self.projectVersionList)
         center_v_layout.addWidget(projectVersionBox)
@@ -159,17 +156,82 @@ class ProjectPage(QWidget):
 
         formatWidget(self)
 
-    def confirm_logout(self):
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Confirm Log Out")
-        msg_box.setText("Are you sure you want to log out?")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        msg_box.setStyleSheet(
-            "QMessageBox { background-color: #0d0e0f; } "
-            "QLabel { color: #b9c2c9; } "
-            "QPushButton { background-color: #151719; color: #b9c2c9; border: 1px solid #30363d; padding: 5px; min-width: 80px; }")
-        if msg_box.exec() == QMessageBox.StandardButton.Yes:
-            self.logout_callback()
+    # -------------------- Drag & Drop Logic --------------------
+
+    def dragEnterEvent(self, event):
+        # Only accept if dragging over the middle list widget area
+        if event.mimeData().hasUrls():
+            pos = event.position().toPoint()
+            if self.projectVersionList.geometry().contains(self.center_container.mapFrom(self, pos)):
+                event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        pos = event.position().toPoint()
+        # Ensure the drop landed inside the list's visual area
+        if not self.projectVersionList.geometry().contains(self.center_container.mapFrom(self, pos)):
+            return
+
+        urls = event.mimeData().urls()
+        if not urls: return
+
+        # Get Repo Root for relative pathing
+        repo_path_raw = self.project_data.repository.path
+        repo_root = os.path.normpath(os.path.abspath(repo_path_raw))
+
+        for url in urls:
+            abs_path = os.path.normpath(url.toLocalFile())
+            if os.path.isfile(abs_path):
+                # Calculate relative path past the repository
+                relative_path = os.path.relpath(abs_path, repo_root)
+                if relative_path.startswith(".."):
+                    QMessageBox.warning(self, "Invalid Location", f"File must be inside repository:\n{repo_root}")
+                    continue
+
+                # Prompt for version message
+                message, ok = QInputDialog.getMultiLineText(self, "New Version", "Enter version message:")
+                if ok and message:
+                    status = "Pending"
+                    # Admin Auto-Approve Check
+                    if self.user.role == "Admin":
+                        reply = QMessageBox.question(self, "Admin", "Auto-approve this version?",
+                                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                        if reply == QMessageBox.StandardButton.Yes:
+                            status = "Approved"
+
+                    try:
+                        # Create version (Inherits M2M files from previous version automatically)
+                        new_ver = addNextProjectVersionToDB(self.project_data, self.user, message, relative_path)
+                        new_ver.status = status
+                        new_ver.save()
+
+                        self.refresh_version_list()
+                        guiSetAuditLog(self, "Project")
+                    except Exception as e:
+                        QMessageBox.warning(self, "DB Error", f"Failed: {e}")
+
+        event.acceptProposedAction()
+
+    # -------------------- UI Helpers --------------------
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh_version_list()
+        guiSetAuditLog(self, "Project")
+
+    def refresh_version_list(self):
+        self.projectVersionList.clear()
+        self.projectVersionData = getProjectVersionsByProjectID(self.project_data.id)
+        version_icons = getItemIcons(self.projectVersionData, "ProjectVersion")
+
+        for p, icon in zip(self.projectVersionData, version_icons):
+            item = QListWidgetItem(self.projectVersionList)
+            item.setSizeHint(QSize(0, 40))
+            custom_widget = FileItemWidget(p, icon, self, context_type="Project")
+            self.projectVersionList.addItem(item)
+            self.projectVersionList.setItemWidget(item, custom_widget)
+
+    def handle_follow(self, version_obj):
+        if version_obj: self.version_callback(version_obj)
 
     def handle_audit_toggle(self):
-        guiExpandAuditLog(self, "Dashboard")
+        guiExpandAuditLog(self, "Project")

@@ -70,17 +70,24 @@ class ProjectVersion(models.Model):
 
 
 class VersionFile(models.Model):
-
-    version = models.ForeignKey(ProjectVersion, on_delete=models.CASCADE)
+    # Change ForeignKey to ManyToManyField
+    versions = models.ManyToManyField(
+        ProjectVersion,
+        related_name="version_files"
+    )
 
     path = models.CharField(max_length=255, default="unknown")
-
     content = models.TextField()
-
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("version", "path")
+        # Note: 'unique_together' is no longer strictly enforceable at the DB level
+        # for ManyToMany relationships in the same way.
+        # Uniqueness is now handled via application logic or a 'through' model.
+        verbose_name = "Version File"
+
+    def __str__(self):
+        return self.path
 
 
 class VersionComment(models.Model):
@@ -95,17 +102,19 @@ class VersionComment(models.Model):
 
 
 class AuditLog(models.Model):
-
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-
     project = models.ForeignKey(
         Project,
         on_delete=models.SET_NULL,
         null=True
     )
-
+    # Add this line:
+    project_version = models.ForeignKey(
+        'ProjectVersion', # Use string if ProjectVersion is defined later in the file
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
     action = models.CharField(max_length=100)
-
     details = models.TextField(blank=True)
-
     timestamp = models.DateTimeField(auto_now_add=True)

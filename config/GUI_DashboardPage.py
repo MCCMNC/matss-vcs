@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from GUIFunctions import *
 from DBFunctions import *
+from GUI_FileItemWidget import FileItemWidget # Import custom widget
 
 SCROLLBAR_STYLE = """
     QScrollBar:vertical {
@@ -31,7 +32,7 @@ def getItemIcons(inputDBElements, inputItemsType):
     returnedIcons = []
     icon_provider = QFileIconProvider()
     for item in inputDBElements:
-        file_info = QFileInfo(getElementFullPath(item, inputItemsType))
+        file_info = QFileInfo(getElementRelativePath(item, inputItemsType))
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
     return returnedIcons
@@ -86,7 +87,7 @@ class DashboardPage(QWidget):
         left_layout.addWidget(self.pfp)
         left_layout.addWidget(self.user_label)
 
-        guiSetTopLabel(self, "Dashboard")
+        guiSetTopLabel(self, "Dashboard", 24)
 
         self.right_section = QWidget()
         self.right_section.setFixedWidth(350)
@@ -94,12 +95,7 @@ class DashboardPage(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self.logout_btn = QPushButton("Log Out")
-        self.logout_btn.setFixedSize(100, 35)
-        self.logout_btn.setStyleSheet(
-            "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.logout_btn.clicked.connect(self.confirm_logout)
-        right_layout.addWidget(self.logout_btn)
+        guiAddLogoutButton(self, right_layout, self.on_logout)
 
         top_bar_layout.addWidget(self.left_section)
         top_bar_layout.addWidget(self.page_title, 1)
@@ -120,26 +116,42 @@ class DashboardPage(QWidget):
         center_v_layout.setContentsMargins(0, 10, 0, 10)
 
         repo_box = QWidget()
-        repo_box.setFixedSize(500, 500)
         repo_v = QVBoxLayout(repo_box)
         repo_v.setContentsMargins(0, 0, 0, 0)
 
         self.repo_list = QListWidget()
-        # Stylesheet logic synced with RepoPage baseline
+        self.repo_list.setMinimumSize(500, 400)
+        # Enable mouse tracking for hover buttons
+        self.repo_list.setMouseTracking(True)
         self.repo_list.setStyleSheet(
-            f"""QListWidget {{ border: 1px solid #0d1115; background: rgba(255,255,255,0.02); color: #dce1e6; }} 
-               QListWidget::item {{ padding: 5px; }}
-               {SCROLLBAR_STYLE}""")
-        self.repo_list.setIconSize(QSize(20, 20))
-        self.repo_list.itemClicked.connect(self.handle_repo_selection)
+            f"""
+            QListWidget {{ 
+                border: 1px solid #0d1115; 
+                background: rgba(255,255,255,0.02); 
+                color: #dce1e6; 
+                outline: none; 
+            }} 
+            QListWidget::item:hover, QListWidget::item:selected {{ 
+                background: transparent; 
+            }}
+            QListWidget::item {{ 
+                padding: 0px; 
+            }}
+            {SCROLLBAR_STYLE}
+            """
+        )
 
+        # --- Population with FileItemWidget ---
         repos = getUserRepos(self.user)
         repo_icons = getItemIcons(repos, "Repository")
 
         for repo, icon in zip(repos, repo_icons):
-            item = QListWidgetItem(f"{repo.title} - {repo.path}")
-            item.setIcon(icon)
+            item = QListWidgetItem(self.repo_list)
+            item.setSizeHint(QSize(0, 40))
+            # Repository context gives the blue Follow button
+            custom_widget = FileItemWidget(repo, icon, self, context_type="Repository")
             self.repo_list.addItem(item)
+            self.repo_list.setItemWidget(item, custom_widget)
 
         repo_v.addWidget(QLabel("List of Repositories :"))
         repo_v.addWidget(self.repo_list)
@@ -156,27 +168,49 @@ class DashboardPage(QWidget):
         formatWidget(self)
 
     def showEvent(self, event):
+        """Triggered every time the user returns to the Dashboard."""
         super().showEvent(event)
+
+        # UI Clean-up
         self.repo_list.clearSelection()
         self.repo_list.clearFocus()
         self.repo_list.setCurrentItem(None)
 
+        try:
+            # 1. Refresh the Global User Audit Log
+            guiSetAuditLog(self, "Dashboard")
+
+            # 2. Refresh the Repository List
+            self.refresh_repo_list()
+        except Exception as e:
+            print(f"Dashboard refresh failed: {e}")
+
+    def refresh_repo_list(self):
+        """Clears and repopulates the repository list from the DB."""
+        self.repo_list.clear()
+
+        # Fetch fresh data
+        repos = getUserRepos(self.user)
+        repo_icons = getItemIcons(repos, "Repository")
+
+        for repo, icon in zip(repos, repo_icons):
+            item = QListWidgetItem(self.repo_list)
+            item.setSizeHint(QSize(0, 40))
+
+            # Context "Repository" keeps the blue Follow button
+            custom_widget = FileItemWidget(repo, icon, self, context_type="Repository")
+
+            self.repo_list.addItem(item)
+            self.repo_list.setItemWidget(item, custom_widget)
+    # -------------------- Handlers --------------------
+
     def get_pfp_pixmap(self):
         return self.cached_pixmap
 
-    def confirm_logout(self):
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Confirm Log Out")
-        msg_box.setText("Are you sure you want to log out?")
-        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        msg_box.setStyleSheet(
-            "QMessageBox { background-color: #0d0e0f; } QLabel { color: #b9c2c9; } QPushButton { background-color: #151719; color: #b9c2c9; border: 1px solid #30363d; padding: 5px; min-width: 80px; }")
-        if msg_box.exec() == QMessageBox.StandardButton.Yes:
-            self.on_logout()
-
-    def handle_repo_selection(self, item):
-        name = item.text().split(" - ")[0].strip()
-        self.on_repo_selected(name)
+    def handle_follow(self, repo_obj):
+        """Action triggered by blue Follow button"""
+        if repo_obj:
+            self.on_repo_selected(repo_obj.title)
 
     def handle_audit_toggle(self):
         guiExpandAuditLog(self, "Dashboard")

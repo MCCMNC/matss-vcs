@@ -95,7 +95,7 @@ def consoleFileManager(inputUser):
                 print(f"  Project Version Number: {cpv.version_number} | {cpv.created_at} | {cpv.message}")
         elif userChoice == "3": # List all Version Files associated with Project - Approved
             clearConsole()
-            currentFiles = getALlProjectFiles(input("Enter Project ID :"))
+            currentFiles = getALlProjectFilesByProjectID(input("Enter Project ID :"))
             for cpf in currentFiles:
                 print(f"  Project Version Number: {cpf.version_id} | {cpf.created_at} | {cpf.content}")
         elif userChoice == "4": # List Audit Log

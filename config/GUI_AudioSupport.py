@@ -1,0 +1,288 @@
+import os
+import wave
+import numpy as np
+import random
+from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtWidgets import (
+    QWidget, QLabel, QPushButton, QVBoxLayout,
+    QHBoxLayout, QFrame, QSlider
+)
+from PyQt6.QtGui import QFont, QPainter, QColor, QBrush
+import vlc
+
+
+class StaticWaveformWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setFixedHeight(40)
+        self.bars = []
+        self.progress = 0.0
+
+    def generate_from_file(self, path):
+        """Extracts actual peak data from a WAV file."""
+        try:
+            with wave.open(path, 'rb') as w:
+                frames = w.readframes(w.getnframes())
+                samples = np.frombuffer(frames, dtype=np.int16)
+
+                if w.getnchannels() == 2:
+                    samples = samples[::2]
+
+                num_bars = 60
+                chunk_size = len(samples) // num_bars
+                if chunk_size == 0:
+                    self.bars = [0.1] * num_bars
+                    return
+
+                new_bars = []
+                for i in range(num_bars):
+                    chunk = samples[i * chunk_size: (i + 1) * chunk_size]
+                    if len(chunk) > 0:
+                        peak = np.max(np.abs(chunk)) / 32768.0
+                        new_bars.append(max(0.1, peak))
+                    else:
+                        new_bars.append(0.1)
+                self.bars = new_bars
+        except Exception:
+            self.bars = [0.2] * 60
+        self.update()
+
+    def set_progress(self, percentage):
+        self.progress = percentage
+        self.update()
+
+    def clear(self):
+        self.bars = []
+        self.progress = 0.0
+        self.update()
+
+    def paintEvent(self, event):
+        if not self.bars: return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w, h = self.width(), self.height()
+        gap = 2
+        bar_w = (w - (len(self.bars) * gap)) / len(self.bars)
+
+        for i, val in enumerate(self.bars):
+            bar_h = h * val
+            x, y = i * (bar_w + gap), (h - bar_h) / 2
+            color = QColor("#58a6ff") if (i / len(self.bars)) <= self.progress else QColor("#30363d")
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(int(x), int(y), int(bar_w), int(bar_h), 1, 1)
+
+
+class AudioPlayerWidget(QFrame):
+    def __init__(self):
+        super().__init__()
+        self.setFixedWidth(280)
+        self.setFixedHeight(185)
+
+        self.current_file_path = None
+        self.pending_seek = -1
+
+        # Defining integer states to avoid "Unresolved attribute" errors
+        self.VLC_NOTHING = 0
+        self.VLC_OPENING = 1
+        self.VLC_BUFFERING = 2
+        self.VLC_PLAYING = 3
+        self.VLC_PAUSED = 4
+        self.VLC_STOPPED = 5
+        self.VLC_ENDED = 6
+        self.VLC_ERROR = 7
+
+        self.setStyleSheet("""
+            QFrame { 
+                background: #0d1117; 
+                border: 1px solid #30363d; 
+                border-radius: 8px; 
+            }
+            QLabel { color: #c9d1d9; border: none; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(5)
+
+        # --- Top Bar ---
+        top_layout = QHBoxLayout()
+        self.title_label = QLabel("No Audio Loaded")
+        self.title_label.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+        self.title_label.setStyleSheet("color: #8b949e;")
+
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setFixedSize(22, 22)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f85149;
+                color: white;
+                border-radius: 11px;
+                font-size: 11px;
+                font-family: 'Arial';
+                font-weight: bold;
+                border: none;
+                padding: 0px;
+            }
+            QPushButton:hover { background-color: #da3633; }
+        """)
+        self.close_btn.clicked.connect(self.close_and_stop)
+
+        top_layout.addWidget(self.title_label)
+        top_layout.addStretch()
+        top_layout.addWidget(self.close_btn)
+
+        # --- Play Control ---
+        controls_layout = QHBoxLayout()
+        self.play_btn = QPushButton("▶")
+        self.play_btn.setFixedSize(40, 40)
+        self.play_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3165a1;
+                color: white;
+                border-radius: 20px;
+                font-size: 16px;
+                border: none;
+            }
+            QPushButton:hover { background-color: #388bfd; }
+        """)
+        self.play_btn.clicked.connect(self.toggle_playback)
+        controls_layout.addStretch()
+        controls_layout.addWidget(self.play_btn)
+        controls_layout.addStretch()
+
+        # --- Waveform & Slider ---
+        self.waveform = StaticWaveformWidget()
+        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #30363d;
+                height: 4px;
+                background: #21262d;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #58a6ff;
+                width: 10px;
+                height: 10px;
+                margin: -3px 0;
+                border-radius: 5px;
+            }
+        """)
+        self.seek_slider.sliderMoved.connect(self.set_position)
+
+        # --- Time Labels ---
+        time_layout = QHBoxLayout()
+        timer_style = "color: #8b949e; font-size: 10px; font-family: 'Consolas', 'Monospace';"
+        self.current_time_label = QLabel("00:00")
+        self.total_time_label = QLabel("00:00")
+        self.current_time_label.setStyleSheet(timer_style)
+        self.total_time_label.setStyleSheet(timer_style)
+
+        time_layout.addWidget(self.current_time_label)
+        time_layout.addStretch()
+        time_layout.addWidget(self.total_time_label)
+
+        layout.addLayout(top_layout)
+        layout.addLayout(controls_layout)
+        layout.addWidget(self.waveform)
+        layout.addWidget(self.seek_slider)
+        layout.addLayout(time_layout)
+
+        # VLC Player
+        self.instance = vlc.Instance()
+        self.player = self.instance.media_player_new()
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_ui)
+        self.timer.start(100)
+
+    def format_time(self, ms):
+        seconds = (ms // 1000) % 60
+        minutes = (ms // 60000) % 60
+        return f"{minutes:02}:{seconds:02}"
+
+    def close_and_stop(self):
+        self.player.stop()
+        self.hide()
+
+    def load_file(self, path, name):
+        if os.path.exists(path):
+            self.current_file_path = path
+            self.player.stop()
+            self.pending_seek = -1
+            self.current_time_label.setText("00:00")
+            self.seek_slider.setValue(0)
+            self.title_label.setText(os.path.basename(path))
+
+            if path.lower().endswith('.wav'):
+                self.waveform.generate_from_file(path)
+            else:
+                self.waveform.bars = [random.uniform(0.3, 0.7) for _ in range(60)]
+                self.waveform.update()
+
+            media = self.instance.media_new(path)
+            self.player.set_media(media)
+            self.player.play()
+            self.play_btn.setText("⏸")
+            self.show()
+
+    def set_position(self, position):
+        """Update UI and store seek intent."""
+        self.pending_seek = position
+        self.current_time_label.setText(self.format_time(position))
+
+        length = self.player.get_length()
+        if length > 0:
+            self.waveform.set_progress(position / length)
+
+        state = self.player.get_state().value
+        if state in (self.VLC_PLAYING, self.VLC_PAUSED):
+            self.player.set_time(position)
+
+    def toggle_playback(self):
+        state = self.player.get_state().value
+
+        # If track ended or stopped, re-init media to force the engine to wake up
+        if state in (self.VLC_ENDED, self.VLC_STOPPED, self.VLC_NOTHING):
+            if self.current_file_path:
+                media = self.instance.media_new(self.current_file_path)
+                self.player.set_media(media)
+            self.player.play()
+            self.play_btn.setText("⏸")
+
+        elif state == self.VLC_PLAYING:
+            self.player.pause()
+            self.play_btn.setText("▶")
+        else:
+            self.player.play()
+            self.play_btn.setText("⏸")
+
+    def update_ui(self):
+        state = self.player.get_state().value
+        length = self.player.get_length()
+
+        if state == self.VLC_ENDED:
+            self.play_btn.setText("▶")
+            return
+
+        # Continuous polling for the pending seek
+        if self.pending_seek != -1 and state in (self.VLC_PLAYING, self.VLC_PAUSED):
+            if length > 0:
+                self.player.set_time(self.pending_seek)
+                curr = self.player.get_time()
+                # If VLC head has moved near our target, clear the flag
+                if abs(curr - self.pending_seek) < 1000:
+                    self.pending_seek = -1
+            return
+
+        if length > 0 and not self.seek_slider.isSliderDown():
+            t = self.player.get_time()
+            if t >= 0:
+                self.seek_slider.setMaximum(length)
+                self.seek_slider.setValue(t)
+                self.current_time_label.setText(self.format_time(t))
+                self.total_time_label.setText(self.format_time(length))
+                self.waveform.set_progress(t / length)

@@ -17,7 +17,8 @@ except RuntimeWarning:
 from GUI_LoginPage import LoginPage
 from GUI_DashboardPage import DashboardPage
 from GUI_RepoPage import RepoPage
-from GUI_ProjectPage import ProjectPage # Assuming ProjectPage is defined there
+from GUI_ProjectPage import ProjectPage
+from GUI_ProjectVersionPage import ProjectVersionPage  # Import the new page
 
 
 class MainWindow(QMainWindow):
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
         self.dashboard_page = None
         self.repo_page = None
         self.project_page = None
+        self.version_page = None  # Tracking for version page
 
         self.Stack.addWidget(self.login_page)
         self.Stack.setCurrentWidget(self.login_page)
@@ -108,7 +110,6 @@ class MainWindow(QMainWindow):
             self.Stack.removeWidget(self.repo_page)
             self.repo_page.deleteLater()
 
-        # Pass show_project as the new project_callback
         self.repo_page = RepoPage(
             self.current_user,
             repo_name,
@@ -122,23 +123,51 @@ class MainWindow(QMainWindow):
         self.Stack.setCurrentWidget(self.repo_page)
 
     def show_project(self, project_data):
-        """Navigates to the ProjectPage when a project is clicked in RepoPage"""
         pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
         if self.project_page:
             self.Stack.removeWidget(self.project_page)
             self.project_page.deleteLater()
 
+        # Added self.show_version as the version_callback
         self.project_page = ProjectPage(
             self.current_user,
             project_data,
             self.back_to_repo,
             self.logout,
+            self.show_version,
             pfp_pixmap=pixmap)
         self.Stack.addWidget(self.project_page)
         self.Stack.setCurrentWidget(self.project_page)
 
+    def show_version(self, version_data):
+        """Navigates to the ProjectVersionPage when a version is clicked in ProjectPage"""
+        pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
+
+        if self.version_page:
+            self.Stack.removeWidget(self.version_page)
+            self.version_page.deleteLater()
+
+        self.version_page = ProjectVersionPage(
+            self.current_user,
+            version_data,
+            self.back_to_project,
+            self.logout,
+            pfp_pixmap=pixmap
+        )
+        self.Stack.addWidget(self.version_page)
+        self.Stack.setCurrentWidget(self.version_page)
+
+    def back_to_project(self):
+        """Returns from VersionPage to ProjectPage"""
+        if self.project_page:
+            self.Stack.setCurrentWidget(self.project_page)
+
+        if self.version_page:
+            self.Stack.removeWidget(self.version_page)
+            self.version_page.deleteLater()
+            self.version_page = None
+
     def back_to_repo(self):
-        """Returns from ProjectPage to the existing RepoPage"""
         if self.repo_page:
             self.Stack.setCurrentWidget(self.repo_page)
 
@@ -161,7 +190,7 @@ class MainWindow(QMainWindow):
             self.current_user = None
 
         # Clean up all pages on logout
-        for page_attr in ['dashboard_page', 'repo_page', 'project_page']:
+        for page_attr in ['dashboard_page', 'repo_page', 'project_page', 'version_page']:
             page = getattr(self, page_attr)
             if page:
                 self.Stack.removeWidget(page)
