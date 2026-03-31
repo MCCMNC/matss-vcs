@@ -1,16 +1,17 @@
 import os
-import django
+from datetime import timezone
 
+import django
+from django.db import transaction
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
-from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog, Repository
+from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog, Repository, RepositoryMembership
+
 
 def getUserAuditLogs(inputUserID):
-        # Potential issue: no logs for a user → empty queryset
     return AuditLog.objects.filter(user_id=inputUserID).order_by("timestamp")
 def getProjectAuditLogs(inputProjectID):
-        # Potential issue: no logs for a project → empty queryset
     return AuditLog.objects.filter(project_id=inputProjectID).order_by("timestamp")
 
 def getProjectByID(inputProjectID):
@@ -20,16 +21,12 @@ def getProjectByVersionFile(inputVersion):
     return inputVersion.project
 
 def getUserProjects(user):
-    projects = Project.objects.filter(owner=user) #ISSUE : ONLY FILTERS FOR OWNER
-
-    # Potential issue: if user is None or not a valid User instance, this will return an empty queryset
+    projects = Project.objects.filter(owner=user)
     return projects
 
 def getProjectVersionAuditLogsByID(inputProjectVersionID):
     try:
-        # Force integer conversion to prevent type mismatch
         version_id = int(inputProjectVersionID)
-        # Use the FK field name (usually fieldname_id in Django)
         return AuditLog.objects.filter(project_version_id=version_id).order_by("timestamp")
     except (ValueError, TypeError):
         return []
@@ -45,12 +42,7 @@ def getALlProjectFilesByProjectID(inputProjectId):
 
 def getProjectVersionFilesByProjectVersionID(inputVersionID):
     try:
-        # 1. Get the specific version
         version = ProjectVersion.objects.get(id=inputVersionID)
-
-        # 2. Return all linked files via the ManyToMany relationship
-        # 'version_files' is the related_name you defined in the model.
-        # Use .all() to get the QuerySet
         return version.version_files.all()
 
     except ProjectVersion.DoesNotExist:
@@ -75,8 +67,17 @@ def logCreateProject(inputUser,inputProject):
     AuditLog.objects.get_or_create(
         user_id=inputUser.pk,
         project_id = inputProject.pk,
+        repository_id=inputProject.repository_id,
         action="CREATE_PROJECT",
         details=f"ADDED {inputProject.title} to {inputProject.repository.title}"
+    )
+    AuditLog.objects.get_or_create(
+        user_id=inputUser.pk,
+        project_id = inputProject.pk,
+        repository_id=inputProject.repository_id,
+        project_version_id = ProjectVersion.objects.filter(project_id=inputProject.pk).first().pk,
+        action="CREATE_VERSION",
+        details=f"ADDED INITIAL VERSION to {inputProject.title}"
     )
 
 def addProjectToDB(inputTitle, inputDescription, inputOwner,inputRepo):
@@ -88,7 +89,6 @@ def addProjectToDB(inputTitle, inputDescription, inputOwner,inputRepo):
             "repository" : inputRepo
         }
     )
-    # Potential issue: title may not be unique → existing project may be reused
     logCreateProject(inputOwner,currentProject)
 
 def logCreateProjectVersion(inputUser, inputProject, inputVersion):
@@ -96,13 +96,12 @@ def logCreateProjectVersion(inputUser, inputProject, inputVersion):
         user=inputUser,
         project=inputProject,
         action="CREATE_VERSION",
-        details=f"{inputProject.title} v{inputVersion.version_number} created"
+        details=f"{inputProject.title} v{inputVersion.version_number} created",
+        project_version_id = inputVersion.pk
     )
-    # Potential issue: duplicate logs if uniqueness is not enforced
 
 
 def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage, inputPath):
-    # 1. Get the most recent version
     latest = (
         ProjectVersion.objects
         .filter(project_id=inputProject.pk)
@@ -111,8 +110,6 @@ def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage, inputPath
     )
 
     nextVersion = 1 if not latest else latest.version_number + 1
-
-    # 2. Create the new version
     currentVersion, created = ProjectVersion.objects.get_or_create(
         project=inputProject,
         version_number=nextVersion,
@@ -122,11 +119,7 @@ def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage, inputPath
             "message": inputMessage
         }
     )
-
-    # 3. Inherit Many-to-Many relationships
     if latest:
-        # We try 'files' first; if that fails, we check for 'version_files'
-        # or the default Django 'projectversionfile_set'
         for attr in ['files', 'version_files', 'projectversionfile_set']:
             if hasattr(latest, attr):
                 old_files = getattr(latest, attr).all()
@@ -140,13 +133,13 @@ def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage, inputPath
 
 
 def logCreateVersionFile(inputUser, inputProjectVersionFile, inputProjectVersion):
-    # Get the project directly from the version provided
     project = inputProjectVersion.project
 
     AuditLog.objects.create(
         user_id=inputUser.pk,
         project_id=project.pk,
         project_version_id=inputProjectVersion.pk,
+        repository_id=inputProjectVersion.project.repository_id,
         action="CREATE_VERSION_FILE",
         details=(
             f"ADDED {inputProjectVersionFile.path} to "
@@ -156,18 +149,11 @@ def logCreateVersionFile(inputUser, inputProjectVersionFile, inputProjectVersion
 
 
 def addVersionFileToDB(inputUser, inputVersion, inputPath, inputContent):
-    # 1. get_or_create finds or makes the file entry (ID 18 in your screenshot)
-    # Note: We don't pass the version here yet!
     version_file, created = VersionFile.objects.get_or_create(
         path=inputPath,
         content=inputContent
     )
-
-    # 2. Add the relationship to the join table
-    # This is what populates the 'versionfile_id' and 'projectversion_id' columns
     version_file.versions.add(inputVersion)
-
-    # 3. Log the action using the explicit version context
     logCreateVersionFile(inputUser, version_file, inputVersion)
 
     return version_file
@@ -176,35 +162,51 @@ def logRemoveVersionFile(inputUser,inputProjectVersionFile):
     AuditLog.objects.get_or_create(
         user_id = inputUser.pk,
         project_id = getProjectByVersionFile(inputProjectVersionFile).pk,
+        repository_id = inputProjectVersionFile.versions.first().project.repository_id,
         action = "REMOVE_VERSION_FILE",
         details = f"REMOVED {inputProjectVersionFile.path} FROM DB",
     )
 
 
 def removeVersionFileFromDB(inputUser, inputFileObj, inputVersion):
-    # 1. Get the project context from the version, not the file
     project = inputVersion.project
-
-    # 2. Log the deletion BEFORE unlinking (so we still have the data for the log string)
     AuditLog.objects.create(
         user=inputUser,
         project=project,
         project_version=inputVersion,
+        repository_id=inputVersion.project.repository_id,
         action="DELETE_VERSION_FILE",
         details=f"Removed {inputFileObj.path} from {project.title} v{inputVersion.version_number}"
     )
-
-    # 3. Remove the Many-to-Many relationship (Unlink)
-    # This removes the row from the join table but keeps the file in the VersionFile table
     inputFileObj.versions.remove(inputVersion)
-
-    # 4. Optional: Clean up "orphaned" files that aren't linked to ANY version anymore
     if inputFileObj.versions.count() == 0:
         inputFileObj.delete()
-def removeProjectFromDB():
-    return "CURRENTLY UNIMPLEMENTED"
-def removeProjectVersionFromDB():
-    return "CURRENTLY UNIMPLEMENTED"
+def logRemoveProject(inputUser, inputProject):
+    AuditLog.objects.create(
+        user = inputUser,
+        repository_id = inputProject.repository_id,
+        action = "REMOVE_PROJECT",
+        details = f"REMOVED Project '{inputProject.title}' and all associated versions from database"
+    )
+def deleteAllProjectAuditLogs(project_obj):
+    AuditLog.objects.filter(project_id=project_obj.pk).delete()
+def removeProjectFromDB(user, project_obj, deletingRepo=False):
+    try:
+        with transaction.atomic():
+            AuditLog.objects.filter(project_id=project_obj.pk).delete()
+            if deletingRepo :
+                print("deleting repo")
+                AuditLog.objects.filter(repository_id=project_obj.repository_id, project__isnull=True).update(repository=None)
+                AuditLog.objects.filter(repository_id=project_obj.repository_id,project__isnull=True).delete()
+            else : logRemoveProject(user, project_obj)
+            versions = ProjectVersion.objects.filter(project=project_obj)
+            for version in versions:
+                removeProjectVersionFromDB(user, version, deletingProject=True)
+            project_obj.delete()
+            return True
+    except Exception as e:
+        print(f"Critical error during project deletion: {e}")
+        return False
 
 def userLogOut(inputUser):
     inputUser.loginStatus = False
@@ -227,19 +229,13 @@ def approveProjectVersion(inputVersion, inputUser, inputProjectID):
         details = f"{Project.objects.get(pk=inputProjectID).title} v{inputVersion.version_number} approved"
     )
     return 1
-
-def editVersionFileToVersion():
-    return "CURRENTLY UNIMPLEMENTED"
-def getAllRepos():
-    return Repository.objects.all()
 def getUserRepos(inputUser):
-    # Potential issue: if user is None or not a valid User instance, this will return an empty queryset
-    return Repository.objects.filter(project__owner=inputUser).distinct()
-def getRepoProjectsByRepoName(repo_name):
-    # This looks at the 'title' field of the related Repository model
-    return Project.objects.filter(repository__title=repo_name)
+    return Repository.objects.filter(repositorymembership__user=inputUser)
+def getRepoProjectsByRepo(repo_obj):
+    return Project.objects.filter(repository_id=repo_obj.id)
+def getRepoAuditLogsByRepo(repo_obj):
+    return AuditLog.objects.filter(repository_id=repo_obj.id)
 def getRepoAuditLogsByRepoName(repo_name):
-    # This reaches: AuditLog -> Project -> Repository -> title
     return AuditLog.objects.filter(
         project__repository__title__iexact=repo_name
     ).order_by('timestamp')
@@ -274,14 +270,9 @@ def getElementRelativePath(inputElement, inputType, inputContext=None):
         returnedString = f"{inputElement.project.repository.path}/{inputElement.path}"
 
     elif inputType == "ProjectVersionFile":
-        # Use the provided context (inputContext) if available,
-        # otherwise fallback to the first linked version.
         v = inputContext if inputContext else inputElement.versions.first()
 
         if v:
-            # Path logic: RepositoryPath / ProjectPath / FilePath
-            # Note: We usually don't put the 'Version' folder name in the path
-            # unless your OS file structure actually has version folders.
             returnedString = f"{v.project.repository.path}/{inputElement.path}"
         else:
             returnedString = f"ORPHANED/{inputElement.path}"
@@ -290,12 +281,7 @@ def getElementRelativePath(inputElement, inputType, inputContext=None):
 
 
 def getVersionFileByPath(inputPath):
-    """
-    Returns a ProjectVersionFile object if the path exists in the DB,
-    otherwise returns None.
-    """
     try:
-        # We search by the relative path since that is the unique identifier for the file entry
         return VersionFile.objects.filter(path=inputPath).first()
     except Exception as e:
         print(f"Error fetching version file by path: {e}")
@@ -303,10 +289,6 @@ def getVersionFileByPath(inputPath):
 
 
 def isFileLinkedToVersion(file_obj, version_obj):
-    """
-    Checks if a file is linked, trying all possible relationship names.
-    """
-    # List of possible attribute names for the Many-to-Many field
     possible_attrs = ['files', 'version_files', 'projectversionfile_set']
 
     for attr in possible_attrs:
@@ -319,9 +301,6 @@ def isFileLinkedToVersion(file_obj, version_obj):
 
 
 def linkExistingFileToVersion(file_obj, version_obj):
-    """
-    Links an existing file, trying all possible relationship names.
-    """
     possible_attrs = ['files', 'version_files', 'projectversionfile_set']
 
     for attr in possible_attrs:
@@ -333,3 +312,110 @@ def linkExistingFileToVersion(file_obj, version_obj):
 
     print(f"Error: Could not link file. No M2M relationship found.")
     return False
+def logRemoveProjectVersion(inputUser, inputProject, inputVersion):
+    AuditLog.objects.create(
+        user=inputUser,
+        project=inputProject,
+        repository_id=inputProject.repository.pk,
+        action="REMOVE_VERSION",
+        details=f"DELETED {inputProject.title} v{inputVersion.version_number} from database"
+    )
+
+from django.db import transaction
+def removeProjectVersionFromDB(inputUser, inputVersion,deletingProject=False):
+    try:
+        with transaction.atomic():
+            m2m_attr = 'version_files' if hasattr(inputVersion, 'version_files') else 'files'
+            associated_files = list(getattr(inputVersion, m2m_attr).all())
+
+            files_to_actually_delete = []
+
+            for f in associated_files:
+                usage_list = getVersionsByFileID(f.id)
+                if len(usage_list) <= 1:
+                    files_to_actually_delete.append(f)
+            if not deletingProject :
+                logRemoveProjectVersion(inputUser, inputVersion.project,inputVersion)
+            inputVersion.delete()
+            for orphaned_file in files_to_actually_delete:
+                orphaned_file.delete()
+            return True
+    except Exception as e:
+        print(f"Error during safe deletion: {e}")
+        return False
+
+
+def addProjectAndInitialVersionToDB(user, repo_obj, title, desc, filePath, timestamp):
+    try:
+        # 1. Create the Project
+        print("DB ADDED filePath "+filePath)
+        new_proj = Project.objects.create(
+            title=title,
+            description=desc,
+            owner=user,
+            repository=repo_obj,
+            path=filePath,
+            created_at=timestamp
+        )
+
+        # 2. Create Ver 1
+        ProjectVersion.objects.create(
+            project=new_proj,
+            version_number=1,
+            author_id=user.id,
+            path=filePath,
+            message="Initial Import",
+            created_at=timestamp
+        )
+
+        logCreateProject(user, new_proj)
+        return True
+    except Exception as e:
+        print(f"DB Entry failed: {e}")
+        return False
+
+def createRepositoryInDB(user, title, path):
+    try:
+        with transaction.atomic():
+            new_repo = Repository.objects.create(
+                title=title,
+                path=path,
+                description=f"Local repository initialized from: {path}"
+            )
+            RepositoryMembership.objects.create(
+                user=user,
+                repository=new_repo,
+                repo_role="Admin"
+            )
+            AuditLog.objects.create(
+                user=user,
+                action="CREATE_REPOSITORY",
+                repository_id=new_repo.id,
+                details=f"Created Repository '{title}' at {path}"
+            )
+            print(f"Successfully created repository: {title}")
+            return True
+    except Exception as e:
+        print(f"Database Error during repository creation: {e}")
+        return False
+
+
+def removeRepositoryFromDB(user, repo_obj):
+    try:
+        repo_title = repo_obj.title
+        with transaction.atomic():
+            projects = Project.objects.filter(repository=repo_obj)
+            for project in projects:
+                removeProjectFromDB(user, project,deletingRepo = True)
+            RepositoryMembership.objects.filter(repository=repo_obj).delete()
+            AuditLog.objects.filter(repository_id=repo_obj.pk,action="REMOVE_PROJECT").delete()
+            AuditLog.objects.create(
+                user=user,
+                action="DELETE_REPO",
+                details=f"Permanently deleted Repository '{repo_title}'"
+            )
+            repo_obj.delete()
+            return True
+    except Exception as e:
+        print(f"Error during repository deletion: {e}")
+        return False

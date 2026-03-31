@@ -42,10 +42,16 @@ def guiUserLogin(inputUsername,inputPassword):
     return potentialUser
 
 def auditLogToText(entry):
+    if entry.project is None:
+        return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.details})"
     return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.project.title})"
 def auditLogToTextExtended(entry):
+    if entry.project is None:
+        return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.details})"
     return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.user.username} {entry.action} ({entry.project.title})"
 def auditLogToTextExpanded(entry):
+    if entry.project is None:
+        return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.details})"
     return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.user.username} {entry.action} ({entry.project.title} {entry.details})"
 def guiErrorBox(parent,inputErrorStr):
     msg = QMessageBox(parent)
@@ -59,7 +65,6 @@ def guiSetTopLabel(inputWidget,inputText,inputFontSize):
 
 
 def guiSetAuditLog(inputWidget, inputInstruction):
-    # --- PHASE 1: UI SETUP (Only runs once) ---
     if not hasattr(inputWidget, 'audit_list'):
         inputWidget.audit_container = QWidget()
         inputWidget.audit_container.setFixedWidth(350)
@@ -99,7 +104,7 @@ def guiSetAuditLog(inputWidget, inputInstruction):
 
     elif inputInstruction == "Repo":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.repo_name}")
-        logs = getRepoAuditLogsByRepoName(inputWidget.repo_name)
+        logs = getRepoAuditLogsByRepo(inputWidget.currentRepository)
 
     elif inputInstruction == "Project":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.project_data.title}")
@@ -109,9 +114,6 @@ def guiSetAuditLog(inputWidget, inputInstruction):
         inputWidget.audit_label.setText(
             f"Audit Log for : {inputWidget.project_version.project.title} v{inputWidget.project_version.version_number}")
         logs = getProjectVersionAuditLogsByID(inputWidget.project_version.id)
-
-    # Populate the list with fresh data from DB
-    # Note: Use list(logs) to ensure we can reverse a QuerySet safely
     for log in reversed(list(logs)):
         text = auditLogToText(log)
         inputWidget.original_logs.append(text)
@@ -120,14 +122,11 @@ def guiSetAuditLog(inputWidget, inputInstruction):
         inputWidget.audit_list.addItem(item)
 
 def guiExpandAuditLog(inputWidget, inputInstruction):
-    # Added "Project" and "ProjectVersion" to the allowed instructions
     if inputInstruction not in ["Dashboard", "Repo", "Project", "ProjectVersion"] or getattr(inputWidget, '_is_toggling', False):
         return
 
     inputWidget._is_toggling = True
     expand = not inputWidget.is_expanded
-
-    # Unified UI Toggle
     inputWidget.audit_container.setFixedWidth(inputWidget.width() - 40 if expand else 350)
     inputWidget.center_container.setVisible(not expand)
     inputWidget.right_spacer.setVisible(not expand)
@@ -232,5 +231,78 @@ def guiAddLogoutButton(parent_widget, layout, logout_callback):
     # Returning the button in case you need to store a reference to it
     return logout_btn
 
+import sys
+import shutil
+import subprocess
+import winreg
+
+def guiLocalDeviceHasDefaultProgram(ext):
+    """
+    Dynamically determines if the current OS has a registered
+    application for the given extension (e.g., '.rpp').
+    """
+    if not ext or ext == ".":
+        return False
+    if not ext.startswith('.'):
+        ext = "." + ext
+
+    # --- Windows Logic ---
+    if sys.platform == "win32":
+        try:
+            # Check for the Progid pointer
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, ext) as key:
+                prog_id, _ = winreg.QueryValueEx(key, "")
+            # Check if that Progid has a shell open command
+            shell_path = rf"{prog_id}\shell\open\command"
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, shell_path) as _:
+                return True
+        except (WindowsError, FileNotFoundError):
+            return False
+
+    # --- macOS Logic ---
+    elif sys.platform == "darwin":
+        # On Mac, if 'open' can find an app for the extension, it's valid.
+        # We check if 'open' would succeed without actually launching.
+        try:
+            # 'test -f' isn't enough; we check the handler via 'lsappinfo' or 'open'
+            result = subprocess.run(['open', '-Ra', ext], capture_output=True)
+            return result.returncode == 0
+        except:
+            return True # MacOS 'open' is very robust, fallback to True
+
+    # --- Linux Logic ---
+    elif sys.platform.startswith("linux"):
+        # Linux uses xdg-mime to manage file associations
+        if shutil.which("xdg-mime"):
+            try:
+                # Query the default handler for the mimetype
+                # We construct a generic mimetype guess
+                mimetype = f"application/{ext[1:]}"
+                result = subprocess.run(
+                    ["xdg-mime", "query", "default", mimetype],
+                    capture_output=True, text=True
+                )
+                return len(result.stdout.strip()) > 0
+            except:
+                return False
+        return shutil.which("xdg-open") is not None
+
+    return False
+
+import os
+from datetime import datetime
+
+def guiCreateProjectFromDrop(user, inputRepo_obj, title, desc, source_path):
+    try:
+        repo = inputRepo_obj
+        with open(source_path, 'rb') as fsrc:
+            with open(source_path, 'wb') as fdst:
+                fdst.write(fsrc.read())
+        current_ts = datetime.now()
+        return addProjectAndInitialVersionToDB(user, repo, title, desc, source_path, current_ts)
+
+    except Exception as e:
+        print(f"GUI Drop operation failed: {e}")
+        return False
 def formatWidget(inputWidget):
     formatWidgetSlashes(inputWidget)

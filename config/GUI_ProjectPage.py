@@ -1,4 +1,6 @@
 import os
+import re
+
 from PyQt6.QtCore import Qt, QFileInfo, QSize
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
@@ -156,6 +158,76 @@ class ProjectPage(QWidget):
 
         formatWidget(self)
 
+    # -------------------- Handlers --------------------
+
+    def handle_version_open(self, version_obj):
+        # 1. Get raw strings
+        raw_root = str(self.project_data.repository.path)
+        raw_path = str(version_obj.path)
+        clean_root = re.sub(r'^[\s\0]+|[\s\0]+$', '', raw_root)
+        clean_path = re.sub(r'^[\s\0]+|[\s\0]+$', '', raw_path)
+        if os.path.isabs(clean_path):
+            full_path = clean_path
+        else:
+            full_path = os.path.join(clean_root, clean_path.lstrip('\\/'))
+        full_path = os.path.normpath(os.path.abspath(full_path))
+        project_dir = os.path.dirname(full_path)
+        if not os.path.exists(full_path):
+            QMessageBox.warning(self, "File Not Found", f"No file at:\n{full_path}")
+            return
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(full_path)
+            else:
+                subprocess.Popen(["xdg-open", full_path], cwd=project_dir)
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Error: {e}")
+    def handle_version_delete(self, version_obj):
+        """
+        Handles the deletion of a project version, showing which unique files will be removed.
+        """
+        # 1. Identify files that are only used by this version
+        # Check 'version_files' or 'files' based on your model's attribute name
+        m2m_attr = 'version_files' if hasattr(version_obj, 'version_files') else 'files'
+        associated_files = getattr(version_obj, m2m_attr).all()
+
+        orphaned_files_paths = []
+        for f in associated_files:
+            # Use your existing function to check usage
+            usage_list = getVersionsByFileID(f.id)
+            if len(usage_list) <= 1:
+                orphaned_files_paths.append(f.path)
+
+        # 2. Construct the confirmation message
+        file_list_str = "\n".join([f" - {path}" for path in orphaned_files_paths])
+        if not orphaned_files_paths:
+            file_list_str = " (No unique files will be removed)"
+
+        msg = (
+            f"Are you sure you want to delete version {version_obj.version_number}?\n\n"
+            f"The following unique files will be removed from the database:\n"
+            f"{file_list_str}"
+        )
+
+        # 3. Prompt the user
+        reply = QMessageBox.question(
+            self, 'Confirm Deletion',
+            msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Pass the object to your safe DB function
+            if removeProjectVersionFromDB(self.user, version_obj):
+                self.refresh_version_list()
+                guiSetAuditLog(self, "Project")
+            else:
+                QMessageBox.warning(self, "Delete Error", "Could not delete the project version.")
+
+    def handle_follow(self, version_obj):
+        if version_obj: self.version_callback(version_obj)
+
     # -------------------- Drag & Drop Logic --------------------
 
     def dragEnterEvent(self, event):
@@ -226,12 +298,10 @@ class ProjectPage(QWidget):
         for p, icon in zip(self.projectVersionData, version_icons):
             item = QListWidgetItem(self.projectVersionList)
             item.setSizeHint(QSize(0, 40))
+            # context_type="Project" ensures the widget selects the correct delete callback
             custom_widget = FileItemWidget(p, icon, self, context_type="Project")
             self.projectVersionList.addItem(item)
             self.projectVersionList.setItemWidget(item, custom_widget)
-
-    def handle_follow(self, version_obj):
-        if version_obj: self.version_callback(version_obj)
 
     def handle_audit_toggle(self):
         guiExpandAuditLog(self, "Project")

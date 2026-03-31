@@ -46,10 +46,12 @@ class MainWindow(QMainWindow):
         self.maxBtn = QPushButton("⬜", self.titleBar)
         self.minBtn = QPushButton("—", self.titleBar)
 
+        self.maxBtn.hide()
+
         for btn in (self.closeBtn, self.maxBtn, self.minBtn):
             btn.setFixedHeight(30)
 
-        self.closeBtn.clicked.connect(self.close)
+        self.closeBtn.clicked.connect(self.handle_title_close)
         self.minBtn.clicked.connect(self.showMinimized)
         self.maxBtn.clicked.connect(self.toggleMaximize)
 
@@ -86,11 +88,17 @@ class MainWindow(QMainWindow):
         self.titleBar.mousePressEvent = self.startMove
         self.titleBar.mouseMoveEvent = self.doMove
 
+    def handle_title_close(self):
+        if self.Stack.currentWidget() == self.login_page:
+            self.close()
+        else:
+            self.logout()
+            self.close()
     def show_dashboard(self, user):
         self.hide()
         self.current_user = user
         self.setFixedSize(1440, 810)
-
+        self.maxBtn.show()
         screen_geo = self.screen().availableGeometry().center()
         frame_geo = self.frameGeometry()
         frame_geo.moveCenter(screen_geo)
@@ -103,7 +111,7 @@ class MainWindow(QMainWindow):
         self.Stack.setCurrentWidget(self.dashboard_page)
         self.show()
 
-    def show_repos(self, repo_name):
+    def show_repos(self, repo_obj):
         pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
 
         if self.repo_page:
@@ -112,7 +120,7 @@ class MainWindow(QMainWindow):
 
         self.repo_page = RepoPage(
             self.current_user,
-            repo_name,
+            repo_obj,
             self.back_to_dashboard,
             self.logout,
             self.show_project,
@@ -186,7 +194,8 @@ class MainWindow(QMainWindow):
     def logout(self):
         self.hide()
         if self.current_user:
-            self.current_user.loginStatus = False
+            self.current_user.loginStatus = 0
+            self.current_user.save()
             self.current_user = None
 
         # Clean up all pages on logout
@@ -203,6 +212,7 @@ class MainWindow(QMainWindow):
         y = (screen.height() - self.height()) // 2
         self.move(x, y)
         self.Stack.setCurrentWidget(self.login_page)
+        self.maxBtn.hide()
         self.show()
 
     def toggleMaximize(self):
