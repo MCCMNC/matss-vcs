@@ -224,6 +224,24 @@ class ProjectVersionPage(QWidget):
         return super().eventFilter(source, event)
 
     def handle_file_drop(self, event):
+        project = getattr(self.project_version, 'project', None)
+    
+        target_repo = None
+        if project:
+            target_repo = getattr(project, 'repository', None)
+
+        auth = False
+        if target_repo:
+            auth = RepositoryMembership.objects.filter(
+                user=self.user,
+                repository=target_repo,
+                repo_role__in=["Admin", "Author"]
+            ).exists()
+
+        if not auth:
+            QMessageBox.warning(self, "Error", "You cannot upload to this repository.")
+            return
+        
         urls = event.mimeData().urls()
         files_added = False
 

@@ -41,7 +41,18 @@ class FileItemWidget(QWidget):
             self._add_open_button(layout, is_version_context=False)
 
         elif self.context_type == "Project":
-            self._add_delete_button(layout, action_type="version")
+            parent_repo = getattr(self.file_obj, 'repository', None)
+    
+            can_delete = False
+            if parent_repo:
+                can_delete = RepositoryMembership.objects.filter(
+                    user=parent_page.user,
+                    repository=parent_repo,
+                    repo_role__in=["Admin", "Author"]
+                ).exists()
+
+            if can_delete:
+                self._add_delete_button(layout, action_type="version")
             file_path = getattr(self.file_obj, 'path', "")
             if file_path:
                 _, ext = os.path.splitext(file_path)

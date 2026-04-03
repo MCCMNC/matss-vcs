@@ -202,13 +202,21 @@ class RepoPage(QWidget):
             "background: #393E42; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
         self.addUser_btn.clicked.connect(self.handleAddUser)
 
+        self.manageUsers_btn = QPushButton("Manage Users")
+        self.manageUsers_btn.setFixedSize(120, 30)
+        self.manageUsers_btn.setStyleSheet(
+            "background: #393E42; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
+        self.manageUsers_btn.clicked.connect(self.handleMangeUsers)
+
         button_row_layout.addWidget(self.back_btn)
         is_admin = RepositoryMembership.objects.filter(
             user=self.user,
             repository=repo_obj.pk,
             repo_role="Admin"
         ).exists()
-        if is_admin : button_row_layout.addWidget(self.addUser_btn)
+        if is_admin:
+            button_row_layout.addWidget(self.addUser_btn)
+            #button_row_layout.addWidget(self.manageUsers_btn)
 
         # Add the horizontal row to the vertical center layout
         center_v_layout.addWidget(button_row_widget)
@@ -234,6 +242,9 @@ class RepoPage(QWidget):
                 self.handle_dropped_file(event)
                 return True
         return super().eventFilter(source, event)
+    
+    def handleMangeUsers(self):
+        print("handleManageUsers")
 
     def handleAddUser(self):
         dialog = AddUserDialog(self)
@@ -279,6 +290,16 @@ class RepoPage(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Could not add user: {e}")
     def handle_dropped_file(self, event):
+        auth = RepositoryMembership.objects.filter(
+            user=self.user,
+            repository=self.currentRepository,
+            repo_role__in=["Admin", "Author"]
+        ).exists()
+
+        if not auth:
+            QMessageBox.warning(self, "Error", "You cannot upload to this repository.")
+            return
+
         files = [u.toLocalFile() for u in event.mimeData().urls()]
         if not files: return
 

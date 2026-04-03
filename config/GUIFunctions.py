@@ -43,16 +43,16 @@ def guiUserLogin(inputUsername,inputPassword):
 
 def auditLogToText(entry):
     if entry.project is None:
-        return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.details})"
-    return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.project.title})"
+        return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.action} ({entry.details})"
+    return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.action} ({entry.project.title})"
 def auditLogToTextExtended(entry):
     if entry.project is None:
-        return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.details})"
-    return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.user.username} {entry.action} ({entry.project.title})"
+        return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.action} ({entry.details})"
+    return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.user.username} {entry.action} ({entry.project.title})"
 def auditLogToTextExpanded(entry):
     if entry.project is None:
-        return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.action} ({entry.details})"
-    return f" {entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")} → {entry.user.username} {entry.action} ({entry.project.title} {entry.details})"
+        return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.action} ({entry.details})"
+    return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.user.username} {entry.action} ({entry.project.title} {entry.details})"
 def guiErrorBox(parent,inputErrorStr):
     msg = QMessageBox(parent)
     msg.setWindowTitle("Error")
