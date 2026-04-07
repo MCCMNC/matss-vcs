@@ -6,30 +6,14 @@ from PyQt6.QtCore import Qt, QFileInfo, QSize, QUrl, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
-    QMessageBox, QFileIconProvider, QSlider, QInputDialog
+    QMessageBox, QFileIconProvider, QSlider, QInputDialog, QDialog
 )
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QPainter, QColor, QBrush
 from GUIFunctions import *
 from DBFunctions import *
 from GUI_FileItemWidget import FileItemWidget
 from GUI_AudioSupport import AudioPlayerWidget, StaticWaveformWidget
-
-SCROLLBAR_STYLE = """
-    QScrollBar:vertical {
-        border: none;
-        background: #0d1115;
-        width: 12px;
-        margin: 0px;
-    }
-    QScrollBar::handle:vertical {
-        background: #30363d;
-        min-height: 20px;
-        border-radius: 5px;
-        margin: 2px;
-    }
-    QScrollBar::handle:vertical:hover { background: #484f58; }
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-"""
+from GUIHelperWindows import ManageUsersDialog, AddUserDialog
 
 
 def getItemIcons(inputDBElements, inputItemsType):
@@ -47,8 +31,9 @@ class ProjectVersionPage(QWidget):
         super().__init__()
         self.user = loginUser
         self.project_version = inputProjectVersion
+        self.currentRepository = inputProjectVersion.project.repository
         self.back_callback = back_callback
-        self.logout_callback = logout_callback
+        self.on_logout = logout_callback
         self.pfp_pixmap = pfp_pixmap
         self.is_expanded = False
         self.original_logs = []
@@ -57,119 +42,8 @@ class ProjectVersionPage(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"ProjectVersionPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
 
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(20, 20, 20, 20)
-        self.main_layout.setSpacing(0)
-        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        # -------------------- Top Bar --------------------
-        top_bar_container = QWidget()
-        top_bar_container.setFixedHeight(70)
-        top_bar_layout = QHBoxLayout(top_bar_container)
-        top_bar_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.left_section = QWidget()
-        self.left_section.setFixedWidth(350)
-        left_layout = QHBoxLayout(self.left_section)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        self.pfp = QPushButton()
-        self.pfp.setFixedSize(60, 60)
-        self.pfp.setStyleSheet("border: none; background: transparent;")
-        if self.pfp_pixmap and not self.pfp_pixmap.isNull():
-            self.pfp.setIcon(QIcon(self.pfp_pixmap))
-            self.pfp.setIconSize(self.pfp.size())
-
-        self.user_label = QLabel(self.user.username)
-        self.user_label.setFont(QFont("Arial", 12))
-        left_layout.addWidget(self.pfp)
-        left_layout.addWidget(self.user_label)
-
-        guiSetTopLabel(self, getElementRelativePath(self.project_version, "ProjectVersion"), 18)
-
-        self.right_section = QWidget()
-        self.right_section.setFixedWidth(350)
-        right_layout = QHBoxLayout(self.right_section)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-        guiAddLogoutButton(self, right_layout, self.handle_logout_click)
-
-        top_bar_layout.addWidget(self.left_section)
-        top_bar_layout.addWidget(self.page_title, 1)
-        top_bar_layout.addWidget(self.right_section)
-        self.main_layout.addWidget(top_bar_container)
-
-        # -------------------- Middle Layout --------------------
-        self.middle_layout = QHBoxLayout()
-        self.middle_layout.setContentsMargins(0, 0, 0, 0)
-        self.middle_layout.setSpacing(0)
-
-        guiSetAuditLog(self, "ProjectVersion")
-
-        self.center_container = QWidget()
-        center_v_layout = QVBoxLayout(self.center_container)
-        center_v_layout.setContentsMargins(0, 10, 0, 10)
-        center_v_layout.setSpacing(10)
-        center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
-
-        version_box = QWidget()
-        version_v = QVBoxLayout(version_box)
-        version_v.setContentsMargins(0, 0, 0, 0)
-
-        self.versionFileList = QListWidget()
-        self.versionFileList.setMinimumSize(500, 400)
-        self.versionFileList.setMouseTracking(True)
-        self.versionFileList.setAcceptDrops(True)
-        self.versionFileList.installEventFilter(self)
-        self.versionFileList.setStyleSheet(
-            f"""
-            QListWidget {{ 
-                border: 1px solid #0d1115; 
-                background: rgba(255,255,255,0.02); 
-                color: #dce1e6; 
-                outline: none; 
-            }} 
-            QListWidget::item:hover, QListWidget::item:selected {{ background: transparent; }}
-            QListWidget::item {{ padding: 0px; }}
-            {SCROLLBAR_STYLE}
-            """
-        )
-
-        version_v.addWidget(QLabel(f"List of Files for Version {self.project_version.version_number} :"))
-        version_v.addWidget(self.versionFileList)
-        center_v_layout.addWidget(version_box)
-
-        self.back_btn = QPushButton("Go Back")
-        self.back_btn.setFixedSize(120, 30)
-        self.back_btn.setStyleSheet(
-            "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.back_btn.clicked.connect(self.handle_back_click)
-        center_v_layout.addWidget(self.back_btn)
-
-        self.right_side_container = QWidget()
-        self.right_side_container.setFixedWidth(350)
-        right_side_layout = QVBoxLayout(self.right_side_container)
-        right_side_layout.setContentsMargins(10, 10, 10, 10)
-        right_side_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        self.audio_player = AudioPlayerWidget()
-        self.audio_player.hide()
-        right_side_layout.addWidget(self.audio_player)
-
-        self.right_spacer = QWidget(self)
-        self.right_spacer.setFixedWidth(0)
-
-        self.middle_layout.addWidget(self.audit_container)
-        self.middle_layout.addWidget(self.center_container, 1)
-        self.middle_layout.addWidget(self.right_side_container)
-        self.middle_layout.addWidget(self.right_spacer)
-
-        self.main_layout.addLayout(self.middle_layout)
-
-        self.refresh_file_list()
-        formatWidget(self)
+        gui_buildDesign(self, "ProjectVersion")
+        gui_buildBottomRow(self,"ProjectVersion")
 
     # -------------------- Handlers --------------------
 
@@ -180,7 +54,50 @@ class ProjectVersionPage(QWidget):
             guiSetAuditLog(self, "ProjectVersion")
         except Exception as e:
             print(f"ProjectVersionPage refresh failed: {e}")
+    def handleManageUsers(self):
+        """Displays the list of all users associated with this repository."""
+        dialog = ManageUsersDialog(self.currentRepository, self)
+        dialog.exec()
+    def handleAddUser(self): #TODO : GET RID OF DB LOGIC HERE
+        dialog = AddUserDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            username, role = dialog.get_data()
 
+            if not username:
+                QMessageBox.warning(self, "Input Error", "Please enter a username.")
+                return
+
+            try:
+                # 1. Check if user exists
+                from vcs_core.models import User, Repository, RepositoryMembership
+
+                try:
+                    target_user = User.objects.get(username=username)
+                except User.DoesNotExist:
+                    QMessageBox.critical(self, "Error", f"User '{username}' not found in database.")
+                    return
+                repo_obj = self.currentRepository
+
+                # 3. Create or Update membership
+                membership, created = RepositoryMembership.objects.update_or_create(
+                    user=target_user,
+                    repository=repo_obj,
+                    defaults={'repo_role': role}
+                )
+
+                # 4. Log the action
+                AuditLog.objects.create(
+                    user=self.user,  # The person performing the addition
+                    action="ADD_MEMBER",
+                    repository=repo_obj,
+                    details=f"Added {username} as {role} to {self.currentRepository.title}"
+                )
+
+                status_msg = "Added" if created else "Updated"
+                QMessageBox.information(self, "Success", f"Successfully {status_msg} {username} as {role}.")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Could not add user: {e}")
     def handle_back_click(self):
         if hasattr(self, 'audio_player'):
             self.audio_player.player.stop()
@@ -214,11 +131,11 @@ class ProjectVersionPage(QWidget):
                 QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
 
     def eventFilter(self, source, event):
-        if source is self.versionFileList and event.type() == event.Type.DragEnter:
+        if source is self.middleList and event.type() == event.Type.DragEnter:
             if event.mimeData().hasUrls():
                 event.acceptProposedAction()
                 return True
-        if source is self.versionFileList and event.type() == event.Type.Drop:
+        if source is self.middleList and event.type() == event.Type.Drop:
             self.handle_file_drop(event)
             return True
         return super().eventFilter(source, event)
@@ -300,18 +217,18 @@ class ProjectVersionPage(QWidget):
         event.acceptProposedAction()
 
     def refresh_file_list(self):
-        self.versionFileList.clear()
+        self.middleList.clear()
         self.projectVersionData = getProjectVersionFilesByProjectVersionID(self.project_version.id)
 
         if self.projectVersionData:
             file_icons = getItemIcons(self.projectVersionData, "ProjectVersionFile")
 
             for f, icon in zip(self.projectVersionData, file_icons):
-                item = QListWidgetItem(self.versionFileList)
+                item = QListWidgetItem(self.middleList)
                 item.setSizeHint(QSize(0, 40))
                 custom_widget = FileItemWidget(f, icon, self, "ProjectVersionFile", self.project_version)
-                self.versionFileList.addItem(item)
-                self.versionFileList.setItemWidget(item, custom_widget)
+                self.middleList.addItem(item)
+                self.middleList.setItemWidget(item, custom_widget)
 
     def handle_file_delete(self, file_obj):
         associated_versions = getVersionsByFileID(file_obj.id)

@@ -12,6 +12,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QLineEdit, QListWidget
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from PyQt6.QtWidgets import QPushButton, QMessageBox
+
+from GUI_DiffPanel import DiffPanel
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
@@ -33,6 +36,175 @@ SCROLLBAR_STYLE = """
     QScrollBar::handle:vertical:hover { background: #484f58; }
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 """
+matvcs_MIDDLE_LIST_STYLE = f"""
+            QListWidget {{ 
+                border: 1px solid #0d1115; 
+                background: rgba(255,255,255,0.02); 
+                color: #dce1e6; 
+                outline: none; 
+            }} 
+            QListWidget::item:hover, QListWidget::item:selected {{ 
+                background: transparent; 
+            }}
+            QListWidget::item {{ 
+                padding: 0px; 
+            }}
+            {SCROLLBAR_STYLE}
+            """
+def gui_buildMIDDLE_LIST(inputWidget): #TODO: Possibly unused
+    inputWidget.middleList = QListWidget()
+    inputWidget.middleList.setMinimumSize(500, 400)
+    inputWidget.middleList.setMouseTracking(True)
+    inputWidget.middleList.setAcceptDrops(True)
+    inputWidget.middleList.installEventFilter(inputWidget)
+    inputWidget.middleList.setStyleSheet(matvcs_MIDDLE_LIST_STYLE)
+def gui_buildBottomRow(inputWidget,inputWidgetType):
+    print(inputWidgetType + " Began Building Bottom Row")
+    inputWidget.button_row_widget = QWidget()
+    inputWidget.button_row_layout = QHBoxLayout(inputWidget.button_row_widget)
+    inputWidget.button_row_layout.setContentsMargins(0, 0, 0, 0)
+    inputWidget.button_row_layout.setSpacing(15)
+    inputWidget.button_row_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+    inputWidget.back_btn = QPushButton("Go Back")
+    inputWidget.back_btn.setFixedSize(120, 30)
+    inputWidget.back_btn.setStyleSheet(
+        "background: #212226; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
+    inputWidget.back_btn.clicked.connect(inputWidget.back_callback)
+    inputWidget.button_row_layout.addWidget(inputWidget.back_btn)
+    if inputWidgetType == "Repository" or inputWidgetType == "Project"or inputWidgetType == "ProjectVersion":
+        print(inputWidgetType + " Attempting to Build 'Manage Users' Button")
+        is_admin = RepositoryMembership.objects.filter(
+            user=inputWidget.user,
+            repository=inputWidget.currentRepository.pk,
+            repo_role="Admin"
+        ).exists()
+        # TODO : ADD USER REMOVAL FUNCTIONALITY TO MANAGE USERS WIDGET AND FILTER HERE
+        inputWidget.manageUsers_btn = QPushButton("Manage Users")
+        inputWidget.manageUsers_btn.setFixedSize(120, 30)
+        inputWidget.manageUsers_btn.setStyleSheet(
+            "background: #133347; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
+        inputWidget.manageUsers_btn.clicked.connect(inputWidget.handleManageUsers)
+        inputWidget.button_row_layout.addWidget(inputWidget.manageUsers_btn)
+        print(inputWidgetType + " Successfully Built 'Manage Users' Button")
+
+        if is_admin:
+            print(inputWidgetType + " Attempting to Build 'Add Users' Button")
+            inputWidget.addUser_btn = QPushButton("Add Users")
+            inputWidget.addUser_btn.setFixedSize(120, 30)
+            inputWidget.addUser_btn.setStyleSheet(
+                "background: #393E42; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
+            inputWidget.addUser_btn.clicked.connect(inputWidget.handleAddUser)
+            inputWidget.button_row_layout.addWidget(inputWidget.addUser_btn)
+            print(inputWidgetType + " Successfully Built 'Add Users' Button")
+
+    # Add the horizontal row to the vertical center layout
+    inputWidget.center_v_layout.addWidget(inputWidget.button_row_widget)
+    print(inputWidgetType + " Passed Bottom Row Build")
+
+def gui_buildDesign(inputWidget,inputWidgetType,inputProgramType = "Studio"):
+    print("Began Building "+inputWidgetType)
+    inputWidget.main_layout = QVBoxLayout(inputWidget)
+    inputWidget.main_layout.setContentsMargins(20, 20, 20, 20)
+    inputWidget.main_layout.setSpacing(0)
+    inputWidget.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+    inputWidget.top_bar_container = QWidget()
+    inputWidget.top_bar_container.setFixedHeight(70)
+    inputWidget.top_bar_layout = QHBoxLayout(inputWidget.top_bar_container)
+    inputWidget.top_bar_layout.setContentsMargins(0, 0, 0, 0)
+
+    inputWidget.left_section = QWidget()
+    inputWidget.left_section.setFixedWidth(350)
+    inputWidget.left_layout = QHBoxLayout(inputWidget.left_section)
+    inputWidget.left_layout.setContentsMargins(0, 0, 0, 0)
+    inputWidget.left_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+    #Gets local profile picture
+    if not hasattr(inputWidget,'pfp_pixmap'):
+        print("no pfp loaded in " + inputWidgetType)
+        inputWidget.pfp = QPushButton()
+        inputWidget.pfp.setFixedSize(60, 60)
+        inputWidget.pfp.setStyleSheet("border: none; background: transparent;")
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
+        pfp_path = os.path.join(BASE_DIR, "Assets", "Poet Cover 3.png")
+        raw_pixmap = QPixmap(pfp_path)
+        if not raw_pixmap.isNull():
+            inputWidget.cached_pixmap = raw_pixmap.scaled(60, 60, Qt.AspectRatioMode.KeepAspectRatio,
+                                                    Qt.TransformationMode.FastTransformation)
+            inputWidget.pfp.setIcon(QIcon(inputWidget.cached_pixmap))
+            inputWidget.pfp.setIconSize(inputWidget.pfp.size())
+            print(inputWidgetType + " Passed pfp Build")
+    else:
+        print(inputWidgetType + " Has Attribute pfp_pixmap")
+        inputWidget.pfp = QPushButton()
+        inputWidget.pfp.setFixedSize(60, 60)
+        inputWidget.pfp.setStyleSheet("border: none; background: transparent;")
+        inputWidget.pfp.setIcon(QIcon(inputWidget.pfp_pixmap))
+        inputWidget.pfp.setIconSize(inputWidget.pfp.size())
+        print(inputWidgetType + " Passed pfp Build")
+    inputWidget.user_label = QLabel(inputWidget.user.username)
+    inputWidget.user_label.setFont(QFont("Arial", 12))
+    inputWidget.left_layout.addWidget(inputWidget.pfp)
+    inputWidget.left_layout.addWidget(inputWidget.user_label)
+
+    if inputProgramType == "Code" and inputWidgetType == "Project":
+        guiSetTopLabel(inputWidget, "Code File", 24)
+    else : guiSetTopLabel(inputWidget, inputProgramType + " " + inputWidgetType, 24)
+    inputWidget.right_section = QWidget()
+    inputWidget.right_section.setFixedWidth(350)
+    inputWidget.right_layout = QHBoxLayout(inputWidget.right_section)
+    inputWidget.right_layout.setContentsMargins(0, 0, 0, 0)
+    inputWidget.right_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+    guiAddLogoutButton(inputWidget, inputWidget.right_layout, inputWidget.on_logout)
+    inputWidget.top_bar_layout.addWidget(inputWidget.left_section)
+    inputWidget.top_bar_layout.addWidget(inputWidget.page_title, 1)
+    inputWidget.top_bar_layout.addWidget(inputWidget.right_section)
+    inputWidget.main_layout.addWidget(inputWidget.top_bar_container)
+
+    inputWidget.middle_layout = QHBoxLayout()
+    inputWidget.middle_layout.setContentsMargins(0, 0, 0, 0)
+    inputWidget.middle_layout.setSpacing(0)
+    inputWidget.center_container = QWidget()
+    inputWidget.center_v_layout = QVBoxLayout(inputWidget.center_container)
+    inputWidget.center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
+    inputWidget.center_v_layout.setSpacing(10)
+    inputWidget.center_v_layout.setContentsMargins(0, 10, 0, 10)
+
+
+    inputWidget.middleList = QListWidget()
+    inputWidget.middleList.setMinimumSize(500, 400)
+    inputWidget.middleList.setMouseTracking(True)
+    inputWidget.middleList.setAcceptDrops(True)
+    inputWidget.middleList.installEventFilter(inputWidget)
+    inputWidget.middleList.setStyleSheet(matvcs_MIDDLE_LIST_STYLE)
+    print(inputWidgetType + " Built Middle List")
+    inputWidget.middle_box = QWidget()
+    inputWidget.middle_v = QVBoxLayout(inputWidget.middle_box)
+    inputWidget.middle_v.setContentsMargins(0, 0, 0, 0)
+
+
+    inputWidget.middle_v.addWidget(QLabel("Relevant List :"))
+    inputWidget.middle_v.addWidget(inputWidget.middleList)
+    inputWidget.center_v_layout.addWidget(inputWidget.middle_box)
+
+
+
+    guiSetAuditLog(inputWidget, inputWidgetType)
+
+    inputWidget.middle_layout.addWidget(inputWidget.audit_container)
+    inputWidget.middle_layout.addWidget(inputWidget.center_container, 1)
+    if inputProgramType == "Code" and inputWidgetType == "Project":
+        # Initialize the new Diff Panel using projectVersionData
+        inputWidget.diff_panel = DiffPanel(inputWidget.projectVersionData)
+        inputWidget.middle_layout.addWidget(inputWidget.diff_panel)
+    else:
+        # Default empty spacer for non-code projects
+        inputWidget.right_spacer = QWidget()
+        inputWidget.right_spacer.setFixedWidth(350)
+        inputWidget.middle_layout.addWidget(inputWidget.right_spacer)
+    inputWidget.main_layout.addLayout(inputWidget.middle_layout)
+    print(inputWidgetType + " Passed GUI Build")
 
 def guiUserLogin(inputUsername,inputPassword):
     potentialUser = User.objects.filter(username = inputUsername).first() # Potential issue: if the username does not exist, potentialUser will be None
@@ -64,7 +236,8 @@ def guiSetTopLabel(inputWidget,inputText,inputFontSize):
     inputWidget.page_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
 
-def guiSetAuditLog(inputWidget, inputInstruction):
+def guiSetAuditLog(inputWidget, inputWidgetType):
+    print(inputWidgetType + " Started setting Audit Log")
     if not hasattr(inputWidget, 'audit_list'):
         inputWidget.audit_container = QWidget()
         inputWidget.audit_container.setFixedWidth(350)
@@ -98,28 +271,30 @@ def guiSetAuditLog(inputWidget, inputInstruction):
     logs = []
 
     # Identify the correct data source based on instruction
-    if inputInstruction == "Dashboard":
+    if inputWidgetType == "Dashboard":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.user.username}")
         logs = getUserAuditLogs(inputWidget.user.id)
 
-    elif inputInstruction == "Repo":
+    elif inputWidgetType == "Repository":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.repo_name}")
         logs = getRepoAuditLogsByRepo(inputWidget.currentRepository)
 
-    elif inputInstruction == "Project":
+    elif inputWidgetType == "Project":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.project_data.title}")
         logs = getProjectAuditLogs(inputWidget.project_data.id)
 
-    elif inputInstruction == "ProjectVersion":
+    elif inputWidgetType == "ProjectVersion":
         inputWidget.audit_label.setText(
             f"Audit Log for : {inputWidget.project_version.project.title} v{inputWidget.project_version.version_number}")
         logs = getProjectVersionAuditLogsByID(inputWidget.project_version.id)
+
     for log in reversed(list(logs)):
         text = auditLogToText(log)
         inputWidget.original_logs.append(text)
         item = QListWidgetItem(text)
         item.setFont(log_font)
         inputWidget.audit_list.addItem(item)
+    print(inputWidgetType + " Successfully set Audit Log")
 
 def guiExpandAuditLog(inputWidget, inputInstruction):
     if inputInstruction not in ["Dashboard", "Repo", "Project", "ProjectVersion"] or getattr(inputWidget, '_is_toggling', False):
@@ -165,6 +340,7 @@ def getItemIcons(inputDBElements, inputItemsType):
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
     return returnedIcons
+
 def formatWidgetSlashes(inputWidget):
     """
     Recursively finds all text-bearing elements within a widget
@@ -195,7 +371,7 @@ def formatWidgetSlashes(inputWidget):
         # handles the recursion, but you can manually recurse if needed.
 
 
-def guiAddLogoutButton(parent_widget, layout, logout_callback):
+def guiAddLogoutButton(parent_widget,layout, logout_callback):
     """
     Creates and adds the standardized logout button to a layout.
 

@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from PyQt6.QtCore import Qt, QFileInfo, QSize, QObject
 from PyQt6.QtWidgets import (
@@ -10,79 +11,20 @@ from PyQt6.QtGui import QFont, QPixmap, QIcon
 from GUIFunctions import *
 from DBFunctions import *
 from GUI_FileItemWidget import FileItemWidget
-
-SCROLLBAR_STYLE = """
-    QScrollBar:vertical {
-        border: none;
-        background: #0d1115;
-        width: 12px;
-        margin: 0px;
-    }
-    QScrollBar::handle:vertical {
-        background: #30363d;
-        min-height: 20px;
-        border-radius: 5px;
-        margin: 2px;
-    }
-    QScrollBar::handle:vertical:hover { background: #484f58; }
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-"""
-
-
-def getItemIcons(inputDBElements, inputItemsType):
-    returnedIcons = []
-    icon_provider = QFileIconProvider()
-    for item in inputDBElements:
-        file_info = QFileInfo(getElementRelativePath(item, inputItemsType))
-        native_icon = icon_provider.icon(file_info)
-        returnedIcons.append(native_icon)
-    return returnedIcons
+from GUIHelperWindows import *
 
 from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QComboBox, QPushButton, QVBoxLayout, QHBoxLayout
 
-class AddUserDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Add User to Repository")
-        self.setFixedSize(300, 180)
-        self.setStyleSheet("background-color: #151719; color: #b9c2c9;")
-
-        layout = QVBoxLayout(self)
-
-        layout.addWidget(QLabel("Username:"))
-        self.username_input = QLineEdit()
-        self.username_input.setStyleSheet("background: #0d1115; border: 1px solid #30363d; padding: 5px;")
-        layout.addWidget(self.username_input)
-
-        layout.addWidget(QLabel("Role:"))
-        self.role_combo = QComboBox()
-        self.role_combo.addItems(["Admin", "Reviewer", "Author", "Guest"])
-        self.role_combo.setStyleSheet("background: #0d1115; border: 1px solid #30363d;")
-        layout.addWidget(self.role_combo)
-
-        btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("Add User")
-        self.add_btn.setStyleSheet("background: #238636; color: white; font-weight: bold; padding: 5px;")
-        self.cancel_btn = QPushButton("Cancel")
-
-        self.add_btn.clicked.connect(self.accept)
-        self.cancel_btn.clicked.connect(self.reject)
-
-        btn_layout.addWidget(self.cancel_btn)
-        btn_layout.addWidget(self.add_btn)
-        layout.addLayout(btn_layout)
-
-    def get_data(self):
-        return self.username_input.text().strip(), self.role_combo.currentText()
-
 class RepoPage(QWidget):
-    def __init__(self, loginUser, repo_obj, back_callback, logout_callback, project_callback, pfp_pixmap=None):
+    def __init__(self, loginUser, repo_obj, back_callback, logout_callback, project_callback,
+                 pfp_pixmap=None,programType = "Studio"):
         super().__init__()
+        self.programType = programType
         self.user = loginUser
         self.currentRepository = repo_obj
         self.repo_name = repo_obj.title
         self.back_callback = back_callback
-        self.logout_callback = logout_callback
+        self.on_logout = logout_callback
         self.project_callback = project_callback
         self.pfp_pixmap = pfp_pixmap
         self.is_expanded = False
@@ -92,148 +34,14 @@ class RepoPage(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"RepoPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
 
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(20, 20, 20, 20)
-        self.main_layout.setSpacing(0)
-        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-        # -------------------- Top Bar --------------------
-        top_bar_container = QWidget()
-        top_bar_container.setFixedHeight(70)
-        top_bar_layout = QHBoxLayout(top_bar_container)
-        top_bar_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.left_section = QWidget()
-        self.left_section.setFixedWidth(350)
-        left_layout = QHBoxLayout(self.left_section)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-
-        self.pfp = QPushButton()
-        self.pfp.setFixedSize(60, 60)
-        self.pfp.setStyleSheet("border: none; background: transparent;")
-        if self.pfp_pixmap and not self.pfp_pixmap.isNull():
-            self.pfp.setIcon(QIcon(self.pfp_pixmap))
-            self.pfp.setIconSize(self.pfp.size())
-
-        self.user_label = QLabel(self.user.username)
-        self.user_label.setFont(QFont("Arial", 12))
-        left_layout.addWidget(self.pfp)
-        left_layout.addWidget(self.user_label)
-
-        guiSetTopLabel(self, getElementRelativePath(getRepoByName(self.repo_name), "Repository"), 18)
-
-        self.right_section = QWidget()
-        self.right_section.setFixedWidth(350)
-        right_layout = QHBoxLayout(self.right_section)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-        guiAddLogoutButton(self, right_layout, self.logout_callback)
-
-        top_bar_layout.addWidget(self.left_section)
-        top_bar_layout.addWidget(self.page_title, 1)
-        top_bar_layout.addWidget(self.right_section)
-        self.main_layout.addWidget(top_bar_container)
-
-        # -------------------- Middle Layout --------------------
-        self.middle_layout = QHBoxLayout()
-        self.middle_layout.setContentsMargins(0, 0, 0, 0)
-        self.middle_layout.setSpacing(0)
-
-        guiSetAuditLog(self, "Repo")
-        self.center_container = QWidget()
-        center_v_layout = QVBoxLayout(self.center_container)
-        center_v_layout.setContentsMargins(0, 10, 0, 10)
-        center_v_layout.setSpacing(10)
-        center_v_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignCenter)
-
-        project_box = QWidget()
-        project_v = QVBoxLayout(project_box)
-        project_v.setContentsMargins(0, 0, 0, 0)
-
-        self.project_list = QListWidget()
-        self.project_list.setMinimumSize(500, 400)
-        self.project_list.setMouseTracking(True)
-
-        # --- DRAG AND DROP SETUP ---
-        self.project_list.setAcceptDrops(True)
-        self.project_list.installEventFilter(self)
-
-        self.project_list.setStyleSheet(
-            f"""
-            QListWidget {{ 
-                border: 1px solid #0d1115; 
-                background: rgba(255,255,255,0.02); 
-                color: #dce1e6; 
-                outline: none; 
-            }} 
-            QListWidget::item:hover, QListWidget::item:selected {{ 
-                background: transparent; 
-            }}
-            QListWidget::item {{ 
-                padding: 0px; 
-            }}
-            {SCROLLBAR_STYLE}
-            """
-        )
-        self.refresh_project_list()
-        project_v.addWidget(QLabel("List of Projects :"))
-        project_v.addWidget(self.project_list)
-        center_v_layout.addWidget(project_box)
-
-        # -------------------- Bottom Button Row --------------------
-        # We create a horizontal container to hold both buttons side-by-side
-        button_row_widget = QWidget()
-        button_row_layout = QHBoxLayout(button_row_widget)
-        button_row_layout.setContentsMargins(0, 0, 0, 0)
-        button_row_layout.setSpacing(15)
-        button_row_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-
-        self.back_btn = QPushButton("Go Back")
-        self.back_btn.setFixedSize(120, 30)
-        self.back_btn.setStyleSheet(
-            "background: #151719; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.back_btn.clicked.connect(self.back_callback)
-
-        self.addUser_btn = QPushButton("Add Users")
-        self.addUser_btn.setFixedSize(120, 30)
-        self.addUser_btn.setStyleSheet(
-            "background: #393E42; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.addUser_btn.clicked.connect(self.handleAddUser)
-
-        self.manageUsers_btn = QPushButton("Manage Users")
-        self.manageUsers_btn.setFixedSize(120, 30)
-        self.manageUsers_btn.setStyleSheet(
-            "background: #393E42; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        self.manageUsers_btn.clicked.connect(self.handleMangeUsers)
-
-        button_row_layout.addWidget(self.back_btn)
-        is_admin = RepositoryMembership.objects.filter(
-            user=self.user,
-            repository=repo_obj.pk,
-            repo_role="Admin"
-        ).exists()
-        if is_admin:
-            button_row_layout.addWidget(self.addUser_btn)
-            #button_row_layout.addWidget(self.manageUsers_btn)
-
-        # Add the horizontal row to the vertical center layout
-        center_v_layout.addWidget(button_row_widget)
-
-        self.right_spacer = QWidget()
-        self.right_spacer.setFixedWidth(350)
-
-        self.middle_layout.addWidget(self.audit_container)
-        self.middle_layout.addWidget(self.center_container, 1)
-        self.middle_layout.addWidget(self.right_spacer)
-        self.main_layout.addLayout(self.middle_layout)
-
-        formatWidget(self)
+        # Builds the UI Design and containers
+        gui_buildDesign(self, "Repository",self.programType)
+        # We create the button row and add buttons to it
+        gui_buildBottomRow(self,"Repository")
 
     # -------------------- Drag & Drop Event Filter --------------------
     def eventFilter(self, source, event):
-        if source is self.project_list:
+        if source is self.middleList:
             if event.type() == event.Type.DragEnter:
                 if event.mimeData().hasUrls():
                     event.accept()
@@ -243,8 +51,10 @@ class RepoPage(QWidget):
                 return True
         return super().eventFilter(source, event)
     
-    def handleMangeUsers(self):
-        print("handleManageUsers")
+    def handleManageUsers(self):
+        """Displays the list of all users associated with this repository."""
+        dialog = ManageUsersDialog(self.currentRepository, self)
+        dialog.exec()
 
     def handleAddUser(self):
         dialog = AddUserDialog(self)
@@ -284,9 +94,6 @@ class RepoPage(QWidget):
                 status_msg = "Added" if created else "Updated"
                 QMessageBox.information(self, "Success", f"Successfully {status_msg} {username} as {role}.")
 
-                # Optional: Refresh your UI if you have a member list
-                # self.refresh_member_list()
-
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Could not add user: {e}")
     def handle_dropped_file(self, event):
@@ -320,33 +127,73 @@ class RepoPage(QWidget):
 
     # -------------------- Handlers & Refresh --------------------
     def refresh_project_list(self):
-        self.project_list.clear()
+        self.middleList.clear()
         self.projects_data = getRepoProjectsByRepo(self.currentRepository)
         project_icons = getItemIcons(self.projects_data, "Project")
 
         for p, icon in zip(self.projects_data, project_icons):
-            item = QListWidgetItem(self.project_list)
+            item = QListWidgetItem(self.middleList)
             item.setSizeHint(QSize(0, 40))
             custom_widget = FileItemWidget(p, icon, self, context_type="Project")
-            self.project_list.addItem(item)
-            self.project_list.setItemWidget(item, custom_widget)
+            self.middleList.addItem(item)
+            self.middleList.setItemWidget(item, custom_widget)
+    def handle_file_open(self,project_obj):
+        version_obj = getLatestProjectVersion(project_obj)
+        print("Attempting to Open" + version_obj.path)
+        raw_root = str(project_obj.repository.path)
+        raw_path = str(version_obj.path)
+        clean_root = re.sub(r'^[\s\0]+|[\s\0]+$', '', raw_root)
+        clean_path = re.sub(r'^[\s\0]+|[\s\0]+$', '', raw_path)
+        if os.path.isabs(clean_path):
+            full_path = clean_path
+        else:
+            full_path = os.path.join(clean_root, clean_path.lstrip('\\/'))
+        full_path = os.path.normpath(os.path.abspath(full_path))
+        project_dir = os.path.dirname(full_path)
+        if not os.path.exists(full_path):
+            QMessageBox.warning(self, "File Not Found", f"No file at:\n{full_path}")
+            return
 
-    def handle_delete(self, project_obj):
-        reply = QMessageBox.question(
-            self, 'Confirm Deletion',
-            f"Are you sure you want to delete the project '{project_obj.title}'?\nThis cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            if removeProjectFromDB(self.user, project_obj):
-                self.refresh_project_list()
-                guiSetAuditLog(self, "Repo")
+        try:
+            if sys.platform == "win32":
+                print("Opening" + full_path)
+                os.startfile(full_path)
             else:
-                QMessageBox.warning(self, "Error", "Could not delete project.")
+                subprocess.Popen(["xdg-open", full_path], cwd=project_dir)
+        except Exception as e:
+            QMessageBox.critical(self, "Launch Error", f"Error: {e}")
+        return
+    def handle_delete(self, project_obj):
+        reply = QMessageBox.StandardButton.No
+        if self.programType == "Studio":
+            reply = QMessageBox.question(
+                self, 'Confirm Deletion',
+                f"Are you sure you want to delete the project '{project_obj.title}'?\nThis cannot be undone.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+        elif self.programType == "Code":
+            reply = QMessageBox.question(
+                self, 'Confirm Deletion',
+                f"Are you sure you want to delete the code file '{project_obj.path}'?\nThis cannot be undone.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.programType == "Studio":
+                if removeProjectFromDB(self.user, project_obj):
+                    self.refresh_project_list()
+                    guiSetAuditLog(self, "Repository")
+                else:
+                    QMessageBox.warning(self, "Error", "Could not delete project.")
+            elif self.programType == "Code":
+                if removeCodeFileFromDB(self.user, project_obj):
+                    self.refresh_project_list()
+                    guiSetAuditLog(self, "Repository")
+                else:
+                    QMessageBox.warning(self, "Error", "Could not delete project.")
 
     def handle_follow(self, project_obj):
         if project_obj:
-            self.project_callback(project_obj)
+            self.project_callback(project_obj,self.programType)
 
     def handle_audit_toggle(self):
         guiExpandAuditLog(self, "Repo")

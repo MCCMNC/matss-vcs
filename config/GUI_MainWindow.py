@@ -1,4 +1,3 @@
-import sys
 import os
 import django
 
@@ -19,6 +18,7 @@ from GUI_DashboardPage import DashboardPage
 from GUI_RepoPage import RepoPage
 from GUI_ProjectPage import ProjectPage
 from GUI_ProjectVersionPage import ProjectVersionPage  # Import the new page
+from GUI_ProgramTypePage import ProgramTypePage
 
 
 class MainWindow(QMainWindow):
@@ -74,7 +74,8 @@ class MainWindow(QMainWindow):
         self.Stack = QStackedWidget()
         self.main_v_layout.addWidget(self.Stack)
 
-        self.login_page = LoginPage(self.show_dashboard)
+        self.login_page = LoginPage(self.show_programType)
+        self.programtype_page = None
         self.dashboard_page = None
         self.repo_page = None
         self.project_page = None
@@ -94,7 +95,19 @@ class MainWindow(QMainWindow):
         else:
             self.logout()
             self.close()
-    def show_dashboard(self, user):
+    def show_programType(self,user):
+        self.hide()
+        self.setFixedSize(720, 640)
+        screen_geo = self.screen().availableGeometry().center()
+        frame_geo = self.frameGeometry()
+        frame_geo.moveCenter(screen_geo)
+        self.move(frame_geo.topLeft())
+
+        self.programtype_page = ProgramTypePage(user,self.show_dashboard)
+        self.Stack.addWidget(self.programtype_page)
+        self.Stack.setCurrentWidget(self.programtype_page)
+        self.show()
+    def show_dashboard(self, user,programType = "Studio"):
         self.hide()
         self.current_user = user
         self.setFixedSize(1440, 810)
@@ -105,13 +118,14 @@ class MainWindow(QMainWindow):
         self.move(frame_geo.topLeft())
 
         if not self.dashboard_page:
-            self.dashboard_page = DashboardPage(user, self.show_repos, self.logout)
+            print("MainWindow creating "+programType +" dashboard page")
+            self.dashboard_page = DashboardPage(user, self.show_repos, self.logout,programType)
             self.Stack.addWidget(self.dashboard_page)
 
         self.Stack.setCurrentWidget(self.dashboard_page)
         self.show()
 
-    def show_repos(self, repo_obj):
+    def show_repos(self, repo_obj,programType="Studio"):
         pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
 
         if self.repo_page:
@@ -124,13 +138,14 @@ class MainWindow(QMainWindow):
             self.back_to_dashboard,
             self.logout,
             self.show_project,
-            pfp_pixmap=pixmap
+            pfp_pixmap = pixmap,
+            programType = programType
         )
 
         self.Stack.addWidget(self.repo_page)
         self.Stack.setCurrentWidget(self.repo_page)
 
-    def show_project(self, project_data):
+    def show_project(self, project_data,programType="Studio"):
         pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
         if self.project_page:
             self.Stack.removeWidget(self.project_page)
@@ -143,7 +158,8 @@ class MainWindow(QMainWindow):
             self.back_to_repo,
             self.logout,
             self.show_version,
-            pfp_pixmap=pixmap)
+            pfp_pixmap=pixmap,
+            programType=programType)
         self.Stack.addWidget(self.project_page)
         self.Stack.setCurrentWidget(self.project_page)
 

@@ -1,4 +1,5 @@
 import os
+import sys
 import django
 from PyQt6.QtWidgets import QApplication
 
