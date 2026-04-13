@@ -256,7 +256,7 @@ class ProjectPage(QWidget):
         for p, icon in zip(self.projectVersionData, version_icons):
             isGuest = RepositoryMembership.objects.filter(
                 user=self.user,
-                repository=self.currentRepository,
+                repository_id=self.currentRepository.id,
                 repo_role__in=["Guest"]
             ).exists()
             if isGuest and p.status == "Draft" : continue

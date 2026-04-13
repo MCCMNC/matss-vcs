@@ -1,5 +1,3 @@
-from pathlib import PureWindowsPath
-
 from DBFunctions import *
 import os
 import django
@@ -16,14 +14,11 @@ from PyQt6.QtGui import QFont, QPixmap, QIcon
 from PyQt6.QtWidgets import QPushButton, QMessageBox
 
 from GUI_DiffPanel import DiffPanel
-import requests
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django.setup()
 
 from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
-
-import client_api
 
 SCROLLBAR_STYLE = """
     QScrollBar:vertical {
@@ -81,7 +76,7 @@ def gui_buildBottomRow(inputWidget,inputWidgetType):
         print(inputWidgetType + " Attempting to Build 'Manage Users' Button")
         is_admin = RepositoryMembership.objects.filter(
             user=inputWidget.user,
-            repository=inputWidget.currentRepository.id,
+            repository=inputWidget.currentRepository.pk,
             repo_role="Admin"
         ).exists()
         # TODO : ADD USER REMOVAL FUNCTIONALITY TO MANAGE USERS WIDGET AND FILTER HERE
@@ -211,7 +206,7 @@ def gui_buildDesign(inputWidget,inputWidgetType,inputProgramType = "Studio"):
     inputWidget.main_layout.addLayout(inputWidget.middle_layout)
     print(inputWidgetType + " Passed GUI Build")
 
-def guiUserLogin(inputUsername,inputPassword):#####
+def guiUserLogin(inputUsername,inputPassword):
     potentialUser = User.objects.filter(username = inputUsername).first() # Potential issue: if the username does not exist, potentialUser will be None
     if potentialUser is None or potentialUser.password_hash != inputPassword:
         return None
@@ -278,27 +273,20 @@ def guiSetAuditLog(inputWidget, inputWidgetType):
     # Identify the correct data source based on instruction
     if inputWidgetType == "Dashboard":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.user.username}")
-        print("getting user audit logs thru api")
-        logs = client_api.getUserAuditLogs_Client(inputWidget.user.id)
+        logs = getUserAuditLogs(inputWidget.user.id)
 
     elif inputWidgetType == "Repository":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.repo_name}")
-        print("getting repo audit logs thru api")
-        logs = client_api.getRepoAuditLogsByRepo_Client(inputWidget.currentRepository.id)
-        #logs = getRepoAuditLogsByRepo(inputWidget.currentRepository)
+        logs = getRepoAuditLogsByRepo(inputWidget.currentRepository)
 
     elif inputWidgetType == "Project":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.project_data.title}")
-        print("getting project audit logs api")
-        logs = client_api.getProjectAuditLogs_Client(inputWidget.project_data.id)
-        #logs = getProjectAuditLogs(inputWidget.project_data.id)
+        logs = getProjectAuditLogs(inputWidget.project_data.id)
 
     elif inputWidgetType == "ProjectVersion":
         inputWidget.audit_label.setText(
             f"Audit Log for : {inputWidget.project_version.project.title} v{inputWidget.project_version.version_number}")
-        print("getting project version audit logs by id")
-        logs = client_api.getProjectVersionAuditLogsByID_Client(inputWidget.project_version.id)
-        #logs = getProjectVersionAuditLogsByID(inputWidget.project_version.id)
+        logs = getProjectVersionAuditLogsByID(inputWidget.project_version.id)
 
     for log in reversed(list(logs)):
         text = auditLogToText(log)
@@ -322,13 +310,13 @@ def guiExpandAuditLog(inputWidget, inputInstruction):
     if expand:
         # 1. Determine which logs to fetch based on the page type
         if inputInstruction == "Dashboard":
-            logs = client_api.getUserAuditLogs_Client(inputWidget.user.id)
+            logs = getUserAuditLogs(inputWidget.user.id)
         elif inputInstruction == "Repo":
-            logs = client_api.getRepoAuditLogsByRepo_Client(inputWidget.currentRepository.id)
+            logs = getRepoAuditLogsByRepoName(inputWidget.repo_name)
         elif inputInstruction == "Project":
-            logs = client_api.getProjectAuditLogs_Client(inputWidget.project_data.id)
+            logs = getProjectAuditLogs(inputWidget.project_data.id)
         elif inputInstruction == "ProjectVersion":
-            logs = client_api.getProjectVersionAuditLogsByID_Client(inputWidget.project_version.id)
+            logs = getProjectVersionAuditLogsByID(inputWidget.project_version.id)
         else:
             logs = []
 
@@ -347,14 +335,10 @@ def guiExpandAuditLog(inputWidget, inputInstruction):
 def getItemIcons(inputDBElements, inputItemsType):
     returnedIcons = []
     icon_provider = QFileIconProvider()
-    
     for item in inputDBElements:
-        rel_path = client_api.getElementRelativePath_Client(item.id, inputItemsType)
-        rel_path = PureWindowsPath(rel_path).as_posix()
-        file_info = QFileInfo(rel_path)
+        file_info = QFileInfo(getElementRelativePath(item, inputItemsType))
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
-        
     return returnedIcons
 
 def formatWidgetSlashes(inputWidget):
@@ -486,14 +470,15 @@ from datetime import datetime
 
 def guiCreateProjectFromDrop(user, inputRepo_obj, title, desc, source_path):
     try:
-        user_id=user.id
-        repo_id = inputRepo_obj.id
-
-        return client_api.addProjectAndInitialVersion_Upload_Client(user_id, repo_id, title, desc, source_path)
+        repo = inputRepo_obj
+        with open(source_path, 'rb') as fsrc:
+            with open(source_path, 'wb') as fdst:
+                fdst.write(fsrc.read())
+        current_ts = datetime.now()
+        return addProjectAndInitialVersionToDB(user, repo, title, desc, source_path, current_ts)
 
     except Exception as e:
         print(f"GUI Drop operation failed: {e}")
         return False
-
 def formatWidget(inputWidget):
     formatWidgetSlashes(inputWidget)

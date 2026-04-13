@@ -76,7 +76,9 @@ class DashboardPage(QWidget):
 
     def refresh_repo_list(self): #TODO : UNIFY MIDDLE LIST REFRESH
         self.middleList.clear()
-        repos = getUserRepos(self.user,self.program_type)
+        print("program type ",self.program_type)
+        repos = client_api.getUserRepos_Client(self.user.id, self.program_type)
+        print(repos)
         repo_icons = getItemIcons(repos, "Repository")
 
         for repo, icon in zip(repos, repo_icons):
@@ -91,7 +93,6 @@ class DashboardPage(QWidget):
         if not repo_obj:
             return
 
-        # 1. Double-check with the user
         confirm = QMessageBox.question(
             self, "Confirm Deletion",
             f"Are you sure you want to delete the repository '{repo_obj.title}'?\n\n"
@@ -101,11 +102,9 @@ class DashboardPage(QWidget):
         )
 
         if confirm == QMessageBox.StandardButton.Yes:
-            # 2. Call DB logic
-            success = removeRepositoryFromDB(self.user, repo_obj,self.program_type)
+            success = client_api.removeRepository_Client(self.user.id, repo_obj.id,self.program_type)
 
             if success:
-                # 3. Refresh the UI
                 self.refresh_repo_list()
                 guiSetAuditLog(self, "Dashboard")
             else:

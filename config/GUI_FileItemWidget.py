@@ -99,12 +99,12 @@ class FileItemWidget(QWidget):
             if parent_repo:
                 can_edit = RepositoryMembership.objects.filter(
                     user=parent_page.user,
-                    repository=parent_page.currentRepository,
+                    repository_id=parent_page.currentRepository.id,
                     repo_role__in=["Admin", "Author"]
                 ).exists()
                 can_approve = RepositoryMembership.objects.filter(
                     user=parent_page.user,
-                    repository=parent_page.currentRepository,
+                    repository_id=parent_page.currentRepository.id,
                     repo_role__in=["Admin", "Reviewer"]
                 ).exists()
 
@@ -128,25 +128,26 @@ class FileItemWidget(QWidget):
                 self._add_follow_button(layout)
 
         elif self.context_type == "Project":
-            parent_repo = getattr(self.file_obj, 'repository', None)
+            
             can_edit = False
-            if parent_repo:
-                can_edit = RepositoryMembership.objects.filter(
-                    user=parent_page.user,
-                    repository=parent_repo,
-                    repo_role__in=["Admin", "Author"]
-                ).exists()
+            can_edit = RepositoryMembership.objects.filter(
+                user=parent_page.user,
+                repository_id=self.file_obj.repository.id,
+                repo_role__in=["Admin", "Author"]
+            ).exists()
 
             if can_edit:
+                
                 self._add_delete_button(layout)
             self._add_open_button(layout)
             if not self.explicitNoFollow:
                 self._add_follow_button(layout)
 
         elif self.context_type == "Repository":
+            print(file_obj.title)
             is_admin = RepositoryMembership.objects.filter(
                 user=parent_page.user,
-                repository=file_obj,
+                repository=file_obj.id,
                 repo_role="Admin"
             ).exists()
             if is_admin:

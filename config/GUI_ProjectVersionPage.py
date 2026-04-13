@@ -207,7 +207,7 @@ class ProjectVersionPage(QWidget):
                     self, "File Content", f"Description for {os.path.basename(abs_dropped_path)}:"
                 )
                 if ok:
-                    addVersionFileToDB(self.user, self.project_version, relative_path, content_input)
+                    client_api.addVersionFileToDB_Client(self.user.id, self.project_version,relative_path,content_input)
                     files_added = True
 
         if files_added:
@@ -218,7 +218,7 @@ class ProjectVersionPage(QWidget):
 
     def refresh_file_list(self):
         self.middleList.clear()
-        self.projectVersionData = getProjectVersionFilesByProjectVersionID(self.project_version.id)
+        self.projectVersionData = client_api.getProjectVersionFilesByProjectVersionID_Client(self.project_version.id)
 
         if self.projectVersionData:
             file_icons = getItemIcons(self.projectVersionData, "ProjectVersionFile")
@@ -231,7 +231,7 @@ class ProjectVersionPage(QWidget):
                 self.middleList.setItemWidget(item, custom_widget)
 
     def handle_file_delete(self, file_obj):
-        associated_versions = getVersionsByFileID(file_obj.id)
+        associated_versions = client_api.getVersionsByFileID_Client(file_obj.id)
         version_links = []
 
         for ver in associated_versions:
@@ -252,7 +252,7 @@ class ProjectVersionPage(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                removeVersionFileFromDB(self.user, file_obj, self.project_version)
+                client_api.removeVersionFileFromDB_Client(self.user.id, file_obj.id, self.project_version.id)
                 self.refresh_file_list()
                 guiSetAuditLog(self, "ProjectVersion")
             except Exception as e:

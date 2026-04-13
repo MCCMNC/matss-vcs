@@ -26,7 +26,7 @@ class ManageUsersDialog(QDialog):
     def refresh_list(self, repo_obj):
         self.user_list.clear()
         from vcs_core.models import RepositoryMembership
-        memberships = RepositoryMembership.objects.filter(repository=repo_obj)
+        memberships = RepositoryMembership.objects.filter(repository_id=repo_obj.id)
 
         for m in memberships:
             # Format: "Username (Role)"

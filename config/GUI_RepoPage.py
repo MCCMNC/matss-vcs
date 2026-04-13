@@ -79,7 +79,7 @@ class RepoPage(QWidget):
                 # 3. Create or Update membership
                 membership, created = RepositoryMembership.objects.update_or_create(
                     user=target_user,
-                    repository=repo_obj,
+                    repository=repo_obj.id,
                     defaults={'repo_role': role}
                 )
 
@@ -87,7 +87,7 @@ class RepoPage(QWidget):
                 AuditLog.objects.create(
                     user=self.user,  # The person performing the addition
                     action="ADD_MEMBER",
-                    repository=repo_obj,
+                    repository=repo_obj.id,
                     details=f"Added {username} as {role} to {self.repo_name}"
                 )
 
@@ -99,7 +99,7 @@ class RepoPage(QWidget):
     def handle_dropped_file(self, event):
         auth = RepositoryMembership.objects.filter(
             user=self.user,
-            repository=self.currentRepository,
+            repository=self.currentRepository.id,
             repo_role__in=["Admin", "Author"]
         ).exists()
 
@@ -128,7 +128,9 @@ class RepoPage(QWidget):
     # -------------------- Handlers & Refresh --------------------
     def refresh_project_list(self):
         self.middleList.clear()
-        self.projects_data = getRepoProjectsByRepo(self.currentRepository)
+        self.projects_data = client_api.getRepoProjectsByRepo_Client(self.currentRepository.id)
+        print("ot repo page projects_data: ", self.projects_data)
+        print("repo id-to: ", self.currentRepository.id)
         project_icons = getItemIcons(self.projects_data, "Project")
 
         for p, icon in zip(self.projects_data, project_icons):
@@ -138,7 +140,7 @@ class RepoPage(QWidget):
             self.middleList.addItem(item)
             self.middleList.setItemWidget(item, custom_widget)
     def handle_file_open(self,project_obj):
-        version_obj = getLatestProjectVersion(project_obj)
+        version_obj = client_api.getLatestProjectVersion_Client(project_obj.id)
         print("Attempting to Open" + version_obj.path)
         raw_root = str(project_obj.repository.path)
         raw_path = str(version_obj.path)

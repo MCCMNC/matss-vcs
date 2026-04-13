@@ -452,26 +452,29 @@ def addNextCodeFileVersionToDB(inputProject, inputAuthor, inputMessage, localPat
     Takes a file from localPath, copies it into the repository storage
     as the new 'current' file, and creates a versioned backup (_N).
     """
+
     try:
         # --- 1. Path Normalization for the Repository ---
         base_storage = os.path.normpath(databaseStoragePath)
+        print(1)
         repo_obj = inputProject.repository
+        
         repo_rel_path = os.path.normpath(repo_obj.path)
 
         if repo_rel_path.startswith(base_storage):
             repo_base_disk_path = repo_rel_path
         else:
             repo_base_disk_path = os.path.join(base_storage, repo_rel_path)
-
+        print(2)
         # --- 2. Determine Version Number ---
         latestCodeFileVer = (
             ProjectVersion.objects
-            .filter(project=inputProject)
+            .filter(project_id=inputProject.id)
             .order_by("-version_number")
             .first()
         )
         next_version_num = 1 if not latestCodeFileVer else latestCodeFileVer.version_number + 1
-
+        print(3)
         # --- 3. Define Internal Repository Paths ---
         # inputProject.path is the relative path within the repo (e.g., 'src/main.py')
         internal_rel_path = inputProject.path
@@ -486,12 +489,12 @@ def addNextCodeFileVersionToDB(inputProject, inputAuthor, inputMessage, localPat
 
         relative_versioned_path = os.path.join(file_dir, f"{name}_{next_version_num}{ext}").replace('\\', '/')
         full_versioned_backup_path = os.path.normpath(os.path.join(repo_base_disk_path, relative_versioned_path))
-
+        print(4)
         # --- 4. Physical File Operations ---
         if not os.path.exists(localPath):
             print(f"Error: User's local file not found at {localPath}")
             return None
-
+        print(5)
         # A. Copy from User's Computer to the Main Repo Location (Updates 'main.py')
         shutil.copy2(localPath, full_repo_destination)
 
@@ -507,7 +510,7 @@ def addNextCodeFileVersionToDB(inputProject, inputAuthor, inputMessage, localPat
             final_status = "Draft"
             is_admin = RepositoryMembership.objects.filter(
                 user=inputAuthor,
-                repository=repo_obj,
+                repository_id=repo_obj.id,
                 repo_role="Admin"
             ).exists()
 
@@ -516,7 +519,7 @@ def addNextCodeFileVersionToDB(inputProject, inputAuthor, inputMessage, localPat
 
             # Create the next ProjectVersion pointing to the _N file
             currentVersion = ProjectVersion.objects.create(
-                project=inputProject,
+                project_id=inputProject.id,
                 version_number=next_version_num,
                 author=inputAuthor,
                 path=relative_versioned_path,  # Path to the _N file
