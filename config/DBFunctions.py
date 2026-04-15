@@ -85,15 +85,19 @@ def logCreateProject(inputUser,inputProject):
     )
 
 def addProjectToDB(inputTitle, inputDescription, inputOwner,inputRepo):
-    currentProject, _ = Project.objects.get_or_create(
-        title=inputTitle,
-        defaults={
-            "description": inputDescription,
-            "owner": inputOwner,
-            "repository" : inputRepo
-        }
-    )
-    logCreateProject(inputOwner,currentProject)
+    try:
+        with transaction.atomic():
+            currentProject, _ = Project.objects.get_or_create(
+                title=inputTitle,
+                defaults={
+                    "description": inputDescription,
+                    "owner": inputOwner,
+                    "repository" : inputRepo
+                }
+            )
+            logCreateProject(inputOwner,currentProject)
+    except Exception as e:
+        print(f"Error during project creation: {e}")
 
 def logCreateProjectVersion(inputUser, inputProject, inputVersion):
     returnedLog, _ = AuditLog.objects.get_or_create(
@@ -105,36 +109,41 @@ def logCreateProjectVersion(inputUser, inputProject, inputVersion):
     )
 
 
+# NEW
 def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage, inputPath):
-    latest = (
-        ProjectVersion.objects
-        .filter(project_id=inputProject.pk)
-        .order_by("-version_number")
-        .first()
-    )
+    try:
+        with transaction.atomic():
+            latest = (
+                ProjectVersion.objects
+                .filter(project_id=inputProject.pk)
+                .order_by("-version_number")
+                .first()
+            )
 
-    nextVersion = 1 if not latest else latest.version_number + 1
-    currentVersion, created = ProjectVersion.objects.get_or_create(
-        project=inputProject,
-        version_number=nextVersion,
-        defaults={
-            "path": inputPath,
-            "author": inputAuthor,
-            "message": inputMessage
-        }
-    )
-    if latest:
-        for attr in ['files', 'version_files', 'projectversionfile_set']:
-            if hasattr(latest, attr):
-                old_files = getattr(latest, attr).all()
-                getattr(currentVersion, attr).add(*old_files)
-                break
-        else:
-            print("Warning: No Many-to-Many relationship found on ProjectVersion.")
+            nextVersion = 1 if not latest else latest.version_number + 1
+            currentVersion, created = ProjectVersion.objects.get_or_create(
+                project=inputProject,
+                version_number=nextVersion,
+                defaults={
+                    "path": inputPath,
+                    "author": inputAuthor,
+                    "message": inputMessage
+                }
+            )
+            if latest:
+                for attr in ['files', 'version_files', 'projectversionfile_set']:
+                    if hasattr(latest, attr):
+                        old_files = getattr(latest, attr).all()
+                        getattr(currentVersion, attr).add(*old_files)
+                        break
+                else:
+                    print("Warning: No Many-to-Many relationship found on ProjectVersion.")
 
-    logCreateProjectVersion(inputAuthor, inputProject, currentVersion)
-    return currentVersion
-
+            logCreateProjectVersion(inputAuthor, inputProject, currentVersion)
+            return currentVersion
+    except Exception as e:
+        print(f"Error during project version creation: {e}")
+        return None
 
 def logCreateVersionFile(inputUser, inputProjectVersionFile, inputProjectVersion):
     project = inputProjectVersion.project
@@ -152,16 +161,21 @@ def logCreateVersionFile(inputUser, inputProjectVersionFile, inputProjectVersion
     )
 
 
+# NEW
 def addVersionFileToDB(inputUser, inputVersion, inputPath, inputContent):
-    version_file, created = VersionFile.objects.get_or_create(
-        path=inputPath,
-        content=inputContent
-    )
-    version_file.versions.add(inputVersion)
-    logCreateVersionFile(inputUser, version_file, inputVersion)
+    try:
+        with transaction.atomic():
+            version_file, created = VersionFile.objects.get_or_create(
+                path=inputPath,
+                content=inputContent
+            )
+            version_file.versions.add(inputVersion)
+            logCreateVersionFile(inputUser, version_file, inputVersion)
 
-    return version_file
-
+            return version_file
+    except Exception as e:
+        print(f"Error during version file creation: {e}")
+        return None
 def logRemoveVersionFile(inputUser,inputProjectVersionFile):
     AuditLog.objects.get_or_create(
         user_id = inputUser.pk,
@@ -172,19 +186,24 @@ def logRemoveVersionFile(inputUser,inputProjectVersionFile):
     )
 
 
+# NEW
 def removeVersionFileFromDB(inputUser, inputFileObj, inputVersion):
-    project = inputVersion.project
-    AuditLog.objects.create(
-        user=inputUser,
-        project=project,
-        project_version=inputVersion,
-        repository_id=inputVersion.project.repository_id,
-        action="DELETE_VERSION_FILE",
-        details=f"Removed {inputFileObj.path} from {project.title} v{inputVersion.version_number}"
-    )
-    inputFileObj.versions.remove(inputVersion)
-    if inputFileObj.versions.count() == 0:
-        inputFileObj.delete()
+    try:
+        with transaction.atomic():
+            project = inputVersion.project
+            AuditLog.objects.create(
+                user=inputUser,
+                project=project,
+                project_version=inputVersion,
+                repository_id=inputVersion.project.repository_id,
+                action="DELETE_VERSION_FILE",
+                details=f"Removed {inputFileObj.path} from {project.title} v{inputVersion.version_number}"
+            )
+            inputFileObj.versions.remove(inputVersion)
+            if inputFileObj.versions.count() == 0:
+                inputFileObj.delete()
+    except Exception as e:
+        print(f"Error during version file removal: {e}")
 def logRemoveProject(inputUser, inputProject):
     AuditLog.objects.create(
         user = inputUser,
@@ -244,19 +263,25 @@ def userLogIn(inputUser):
     inputUser.loginStatus = True
     inputUser.save()
 
+# NEW
 def approveProjectVersion(inputVersion, inputUser, inputProjectID):
-    if inputVersion.status != "Approved":
-        inputVersion.status = "Approved"
-        inputVersion.save()
-        # Potential issue: inputVersion may be None
-    else : return 0
-    createdLog, _ = AuditLog.objects.get_or_create(
-        user = inputUser,
-        project_id = inputProjectID,
-        action = "APPROVE_VERSION",
-        details = f"{Project.objects.get(pk=inputProjectID).title} v{inputVersion.version_number} approved"
-    )
-    return 1
+    try:
+        with transaction.atomic():
+            if inputVersion.status != "Approved":
+                inputVersion.status = "Approved"
+                inputVersion.save()
+                # Potential issue: inputVersion may be None
+            else : return 0
+            createdLog, _ = AuditLog.objects.get_or_create(
+                user = inputUser,
+                project_id = inputProjectID,
+                action = "APPROVE_VERSION",
+                details = f"{Project.objects.get(pk=inputProjectID).title} v{inputVersion.version_number} approved"
+            )
+            return 1
+    except Exception as e:
+        print(f"Error during version approval: {e}")
+        return 0
 def getUserRepos(inputUser, repoType="Studio"):
     """
     Returns repositories of a specific type that the input user
@@ -373,7 +398,8 @@ def logRemoveProjectVersion(inputUser, inputProject, inputVersion):
     )
 
 from django.db import transaction
-def removeProjectVersionFromDB(inputUser, inputVersion,deletingProject=False):
+# Replace with this version (cleaned + consistent)
+def removeProjectVersionFromDB(inputUser, inputVersion, deletingProject=False):
     try:
         with transaction.atomic():
             m2m_attr = 'version_files' if hasattr(inputVersion, 'version_files') else 'files'
@@ -394,7 +420,6 @@ def removeProjectVersionFromDB(inputUser, inputVersion,deletingProject=False):
     except Exception as e:
         print(f"Error during safe deletion: {e}")
         return False
-
 
 def addProjectAndInitialVersionToDB(user, repo_obj, title, desc, filePath, timestamp):
     try:

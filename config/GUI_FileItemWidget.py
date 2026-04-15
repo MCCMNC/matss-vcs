@@ -86,6 +86,20 @@ class FileItemWidget(QWidget):
         self.name_label.setStyleSheet(f"color: #dce1e6; font-size: {textSize}pt;")
         layout.addWidget(self.name_label, 1)  # Give the final label the stretch factor
 
+        if self.context_type == "ProjectVersion":
+            author_obj = getattr(self.file_obj, 'author', None)
+            author_name = author_obj.username if author_obj else "Unknown"
+
+            self.author_label = QLabel(f"by {author_name}")
+            # Използваме margin-left: -4px, за да дръпнем само този текст наляво
+            self.author_label.setStyleSheet("""
+                        color: #8b949e; 
+                        font-size: 10pt; 
+                        margin-left: -4px; 
+                        padding-right: 10px;
+                    """)
+            layout.addWidget(self.author_label)
+
         # --- Context Switcher (Button Logic) ---
         if self.context_type == "ProjectVersionFile":
             self._add_delete_button(layout, action_type="file")
