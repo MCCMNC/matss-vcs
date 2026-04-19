@@ -1,5 +1,9 @@
-run MATVCSgui.py !!!!!!!!!!!!!!!!!
+(PyCharm) ".\.venv\Scripts\activate"
 
-Current Default username : Admin
+python config/manage.py runserver
 
-Current Default password : 123
+run MATVCSgui.py
+
+Usernames : Admin,Reviewer,Author,Guest
+
+Password for all : 123

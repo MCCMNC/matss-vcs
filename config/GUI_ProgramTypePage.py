@@ -1,20 +1,4 @@
-import os
-import django
-
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QPushButton,
-    QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget
-)
-from PyQt6.QtGui import QPixmap, QIcon
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-django.setup()
-
 from GUIFunctions import *
-from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
-
-
 class ProgramTypePage(QWidget):
     def __init__(self, loginUser, program_choice_callback):
         super().__init__()
@@ -61,8 +45,8 @@ class ProgramTypePage(QWidget):
                     QPushButton:hover { background-color: #79c0ff; }
                 """)
         # Connect to the choice handler
-        self.dashboard_btn.clicked.connect(self.handle_codeChoice)
-        self.alt_dashboard_btn.clicked.connect(self.handle_studioChoice)
+        self.dashboard_btn.clicked.connect(self.handle_studioChoice)
+        self.alt_dashboard_btn.clicked.connect(self.handle_codeChoice)
 
         container_layout.addWidget(self.dashboard_btn)
         container_layout.addWidget(self.alt_dashboard_btn)
@@ -73,12 +57,11 @@ class ProgramTypePage(QWidget):
     def handle_codeChoice(self):
         # Trigger the callback with the stored user object
         if self.program_choice_callback:
-            self.program_choice_callback(self.loginUser)
-
+            self.program_choice_callback(self.loginUser,"Code")
     def handle_studioChoice(self):
         # Trigger the callback with the stored user object
         if self.program_choice_callback:
-            self.program_choice_callback(self.loginUser,"Code")
+            self.program_choice_callback(self.loginUser)
 
     def showEvent(self, event):
         super().showEvent(event)

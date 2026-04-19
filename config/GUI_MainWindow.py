@@ -1,5 +1,4 @@
 import os
-import django
 
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtWidgets import (
@@ -7,11 +6,9 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QStackedWidget
 )
 
+import client_api
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-try:
-    django.setup()
-except RuntimeWarning:
-    pass
 
 from GUI_LoginPage import LoginPage
 from GUI_DashboardPage import DashboardPage
@@ -43,17 +40,14 @@ class MainWindow(QMainWindow):
 
         self.titleLabel = QLabel("    MAT Version Control Software", self.titleBar)
         self.closeBtn = QPushButton("✕", self.titleBar)
-        self.maxBtn = QPushButton("⬜", self.titleBar)
         self.minBtn = QPushButton("—", self.titleBar)
 
-        self.maxBtn.hide()
-
-        for btn in (self.closeBtn, self.maxBtn, self.minBtn):
+        for btn in (self.closeBtn, self.minBtn):
             btn.setFixedHeight(30)
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
         self.closeBtn.clicked.connect(self.handle_title_close)
         self.minBtn.clicked.connect(self.showMinimized)
-        self.maxBtn.clicked.connect(self.toggleMaximize)
 
         titleLayout = QHBoxLayout()
         titleLayout.setContentsMargins(0, 0, 0, 0)
@@ -61,7 +55,6 @@ class MainWindow(QMainWindow):
         titleLayout.addWidget(self.titleLabel)
         titleLayout.addStretch()
         titleLayout.addWidget(self.minBtn)
-        titleLayout.addWidget(self.maxBtn)
         titleLayout.addWidget(self.closeBtn)
         self.titleBar.setLayout(titleLayout)
 
@@ -111,7 +104,6 @@ class MainWindow(QMainWindow):
         self.hide()
         self.current_user = user
         self.setFixedSize(1440, 810)
-        self.maxBtn.show()
         screen_geo = self.screen().availableGeometry().center()
         frame_geo = self.frameGeometry()
         frame_geo.moveCenter(screen_geo)
@@ -209,33 +201,33 @@ class MainWindow(QMainWindow):
 
     def logout(self):
         self.hide()
+
         if self.current_user:
-            self.current_user.loginStatus = 0
-            self.current_user.save()
+            # 1. Notify the Server
+            # Assuming current_user is a dict from our previous login logic
+            user_id = self.current_user.get('id')
+            client_api.logout_request(user_id)
+
+            # 2. Clear local user session
             self.current_user = None
 
-        # Clean up all pages on logout
+        # 3. Clean up all pages on logout
         for page_attr in ['dashboard_page', 'repo_page', 'project_page', 'version_page']:
-            page = getattr(self, page_attr)
+            page = getattr(self, page_attr, None)
             if page:
                 self.Stack.removeWidget(page)
                 page.deleteLater()
                 setattr(self, page_attr, None)
 
+        # 4. Reset Window and return to Login
         self.setFixedSize(480, 640)
         screen = self.screen().availableGeometry()
         x = (screen.width() - self.width()) // 2
         y = (screen.height() - self.height()) // 2
         self.move(x, y)
-        self.Stack.setCurrentWidget(self.login_page)
-        self.maxBtn.hide()
-        self.show()
 
-    def toggleMaximize(self):
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
+        self.Stack.setCurrentWidget(self.login_page)
+        self.show()
 
     def startMove(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

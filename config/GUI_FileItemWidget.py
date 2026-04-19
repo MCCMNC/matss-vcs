@@ -1,30 +1,9 @@
 import os
-from PyQt6.QtCore import Qt, QFileInfo, QSize
-from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QHBoxLayout
-from PyQt6.QtGui import QFont, QPixmap, QIcon
-
-from GUIFunctions import guiLocalDeviceHasDefaultProgram
-from vcs_core.models import RepositoryMembership
-
-import os
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QHBoxLayout, QFileIconProvider
-from PyQt6.QtGui import QPixmap, QIcon
-
 from GUIFunctions import guiLocalDeviceHasDefaultProgram
-from vcs_core.models import RepositoryMembership
-
-import os
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QHBoxLayout, QFileIconProvider
-from PyQt6.QtGui import QPixmap, QIcon
-
-from GUIFunctions import guiLocalDeviceHasDefaultProgram
-from vcs_core.models import RepositoryMembership
-
-
 class FileItemWidget(QWidget):
-    def __init__(self, file_obj, icon, parent_page, context_type, current_version=None, explicitNoFollow=False):
+    def __init__(self, file_obj, icon, parent_page, context_type, current_version=None, explicitNoFollow=False,
+                 can_edit = False, is_admin = False,can_approve = False):
         super().__init__()
         self.file_obj = file_obj
         self.parent_page = parent_page
@@ -91,7 +70,6 @@ class FileItemWidget(QWidget):
             author_name = author_obj.username if author_obj else "Unknown"
 
             self.author_label = QLabel(f"by {author_name}")
-            # Използваме margin-left: -4px, за да дръпнем само този текст наляво
             self.author_label.setStyleSheet("""
                         color: #8b949e; 
                         font-size: 10pt; 
@@ -107,29 +85,14 @@ class FileItemWidget(QWidget):
 
         elif self.context_type == "ProjectVersion":
             parent_repo = getattr(self.file_obj.project, 'repository', None)
-            can_approve = False
-            can_edit = False
-
-            if parent_repo:
-                can_edit = RepositoryMembership.objects.filter(
-                    user=parent_page.user,
-                    repository_id=parent_page.currentRepository.id,
-                    repo_role__in=["Admin", "Author"]
-                ).exists()
-                can_approve = RepositoryMembership.objects.filter(
-                    user=parent_page.user,
-                    repository_id=parent_page.currentRepository.id,
-                    repo_role__in=["Admin", "Reviewer"]
-                ).exists()
-
             if can_edit:
                 if not (parent_repo.repoType == "Code" and file_obj.version_number == 1):
                     self._add_delete_button(layout, action_type="version")
 
-            if file_obj.status == "Draft" and can_approve:
+            if file_obj.status != "Approved":
                 self.name_label.setStyleSheet(f"color: #f06081; font-size: {textSize}pt;")
-                self._add_approve_button(layout)
-
+                if can_approve:
+                    self._add_approve_button(layout)
             file_path = getattr(self.file_obj, 'path', "")
             if file_path:
                 _, ext = os.path.splitext(file_path)
@@ -142,32 +105,37 @@ class FileItemWidget(QWidget):
                 self._add_follow_button(layout)
 
         elif self.context_type == "Project":
-            
-            can_edit = False
-            can_edit = RepositoryMembership.objects.filter(
-                user=parent_page.user,
-                repository_id=self.file_obj.repository.id,
-                repo_role__in=["Admin", "Author"]
-            ).exists()
-
             if can_edit:
-                
-                self._add_delete_button(layout)
-            self._add_open_button(layout)
+                self._add_delete_button(layout,"project")
+            _, ext = os.path.splitext(getattr(self.file_obj, 'path', ""))
+            ext = ext.lower()
+            project_extensions = ['.rpp', '.wav', '.mp3', '.txt', '.pdf']
+            if guiLocalDeviceHasDefaultProgram(ext) or ext in project_extensions:
+                self._add_open_button(layout)
             if not self.explicitNoFollow:
                 self._add_follow_button(layout)
 
         elif self.context_type == "Repository":
             print(file_obj.title)
-            is_admin = RepositoryMembership.objects.filter(
-                user=parent_page.user,
-                repository=file_obj.id,
-                repo_role="Admin"
-            ).exists()
+            self._add_pull_button(layout)
             if is_admin:
                 self._add_delete_button(layout, action_type="repository")
             if not self.explicitNoFollow:
                 self._add_follow_button(layout)
+    def _add_pull_button(self,layout):
+        btn = QPushButton("Pull")
+        btn.setFixedSize(60, 25)
+        btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #82ceea color: black;
+                        border: 1px solid #388bfd; border-radius: 3px; font-weight: bold;
+                    }
+                    QPushButton:hover { background-color: #82ceea; }
+                """)
+        btn.clicked.connect(lambda: self.parent_page.handle_pull(self.file_obj))
+        layout.addWidget(btn)
+        self.active_buttons.append(btn)
+        return 0
     def _add_follow_button(self, layout):
         if self.explicitNoFollow : return
         btn = QPushButton("Follow")
@@ -232,6 +200,8 @@ class FileItemWidget(QWidget):
             btn.clicked.connect(lambda: self.parent_page.handle_delete(self.file_obj))
         elif action_type == "version":
             btn.clicked.connect(lambda: self.parent_page.handle_version_delete(self.file_obj))
+        elif action_type == "project":
+            btn.clicked.connect(lambda: self.parent_page.handle_project_delete(self.file_obj))
         else: # default to file
             btn.clicked.connect(lambda: self.parent_page.handle_file_delete(self.file_obj))
 

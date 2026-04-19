@@ -1,19 +1,11 @@
-import os
 import re
-import shutil
-from PyQt6.QtCore import Qt, QFileInfo, QSize, QObject
-from PyQt6.QtWidgets import (
-    QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
-    QMessageBox, QFileIconProvider, QInputDialog, QLineEdit
-)
-from PyQt6.QtGui import QFont, QPixmap, QIcon
+from PyQt6.QtCore import QSize
 from GUIFunctions import *
 from DBFunctions import *
 from GUI_FileItemWidget import FileItemWidget
 from GUIHelperWindows import *
 
-from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QComboBox, QPushButton, QVBoxLayout, QHBoxLayout
+from PyQt6.QtWidgets import QLineEdit
 
 class RepoPage(QWidget):
     def __init__(self, loginUser, repo_obj, back_callback, logout_callback, project_callback,
@@ -33,7 +25,7 @@ class RepoPage(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"RepoPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
-
+        self.handleAddUser = "TO BE OVERWRITTEN"
         # Builds the UI Design and containers
         gui_buildDesign(self, "Repository",self.programType)
         # We create the button row and add buttons to it
@@ -50,60 +42,13 @@ class RepoPage(QWidget):
                 self.handle_dropped_file(event)
                 return True
         return super().eventFilter(source, event)
-    
-    def handleManageUsers(self):
-        """Displays the list of all users associated with this repository."""
-        dialog = ManageUsersDialog(self.currentRepository, self)
-        dialog.exec()
-
-    def handleAddUser(self):
-        dialog = AddUserDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            username, role = dialog.get_data()
-
-            if not username:
-                QMessageBox.warning(self, "Input Error", "Please enter a username.")
-                return
-
-            try:
-                # 1. Check if user exists
-                from vcs_core.models import User, Repository, RepositoryMembership
-
-                try:
-                    target_user = User.objects.get(username=username)
-                except User.DoesNotExist:
-                    QMessageBox.critical(self, "Error", f"User '{username}' not found in database.")
-                    return
-                repo_obj = self.currentRepository
-
-                # 3. Create or Update membership
-                membership, created = RepositoryMembership.objects.update_or_create(
-                    user=target_user,
-                    repository=repo_obj.id,
-                    defaults={'repo_role': role}
-                )
-
-                # 4. Log the action
-                AuditLog.objects.create(
-                    user=self.user,  # The person performing the addition
-                    action="ADD_MEMBER",
-                    repository=repo_obj.id,
-                    details=f"Added {username} as {role} to {self.repo_name}"
-                )
-
-                status_msg = "Added" if created else "Updated"
-                QMessageBox.information(self, "Success", f"Successfully {status_msg} {username} as {role}.")
-
-            except Exception as e:
-                QMessageBox.critical(self, "Database Error", f"Could not add user: {e}")
     def handle_dropped_file(self, event):
-        auth = RepositoryMembership.objects.filter(
-            user=self.user,
-            repository=self.currentRepository.id,
-            repo_role__in=["Admin", "Author"]
-        ).exists()
+        currentUserRoleInRepo = client_api.getUserRole_Client(self.user.id, self.currentRepository.id)
+        can_edit = False
+        if currentUserRoleInRepo in ["Admin", "Author"]:
+            can_edit = True
 
-        if not auth:
+        if not can_edit:
             QMessageBox.warning(self, "Error", "You cannot upload to this repository.")
             return
 
@@ -119,10 +64,11 @@ class RepoPage(QWidget):
         if not ok2: return
 
         # Call logic to create project and first version
-        if guiCreateProjectFromDrop(self.user, self.currentRepository, title, desc, file_path):
+        try:
+            guiCreateProjectFromDrop(self.user, self.currentRepository, title, desc, file_path)
+            guiSetAuditLog(self, "Repository")
             self.refresh_project_list()
-            guiSetAuditLog(self, "Repo")
-        else:
+        except Exception as e:
             QMessageBox.warning(self, "Error", "Could not create project from file.")
 
     # -------------------- Handlers & Refresh --------------------
@@ -132,40 +78,56 @@ class RepoPage(QWidget):
         print("ot repo page projects_data: ", self.projects_data)
         print("repo id-to: ", self.currentRepository.id)
         project_icons = getItemIcons(self.projects_data, "Project")
-
+        currentUserRoleInRepo = client_api.getUserRole_Client(self.user.id,self.currentRepository.id)
+        can_edit = False
+        if currentUserRoleInRepo in ["Admin", "Author"]:
+            can_edit = True
         for p, icon in zip(self.projects_data, project_icons):
             item = QListWidgetItem(self.middleList)
             item.setSizeHint(QSize(0, 40))
-            custom_widget = FileItemWidget(p, icon, self, context_type="Project")
+            custom_widget = FileItemWidget(p, icon, self, context_type="Project",can_edit = can_edit)
             self.middleList.addItem(item)
             self.middleList.setItemWidget(item, custom_widget)
-    def handle_file_open(self,project_obj):
+
+    def handle_file_open(self, project_obj):
         version_obj = client_api.getLatestProjectVersion_Client(project_obj.id)
-        print("Attempting to Open" + version_obj.path)
+
+        # Get Project Root (Backout from 'config' folder)
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_file_dir)
+
         raw_root = str(project_obj.repository.path)
         raw_path = str(version_obj.path)
+
+        # Strip whitespace/nulls
         clean_root = re.sub(r'^[\s\0]+|[\s\0]+$', '', raw_root)
         clean_path = re.sub(r'^[\s\0]+|[\s\0]+$', '', raw_path)
-        if os.path.isabs(clean_path):
-            full_path = clean_path
+
+        # Apply the config filter logic
+        if clean_root.startswith("config"):
+            # Anchor to the project root so it's a valid absolute path
+            full_path = os.path.normpath(os.path.join(project_root, clean_root, clean_path.lstrip('\\/')))
         else:
-            full_path = os.path.join(clean_root, clean_path.lstrip('\\/'))
-        full_path = os.path.normpath(os.path.abspath(full_path))
+            # Standard relative path logic
+            full_path = os.path.normpath(os.path.abspath(os.path.join(clean_root, clean_path.lstrip('\\/'))))
+
         project_dir = os.path.dirname(full_path)
+
         if not os.path.exists(full_path):
             QMessageBox.warning(self, "File Not Found", f"No file at:\n{full_path}")
             return
 
         try:
             if sys.platform == "win32":
-                print("Opening" + full_path)
+                print("Opening " + full_path)
                 os.startfile(full_path)
             else:
                 subprocess.Popen(["xdg-open", full_path], cwd=project_dir)
         except Exception as e:
             QMessageBox.critical(self, "Launch Error", f"Error: {e}")
         return
-    def handle_delete(self, project_obj):
+    def handle_project_delete(self, project_obj):
+        print("got to handle delete")
         reply = QMessageBox.StandardButton.No
         if self.programType == "Studio":
             reply = QMessageBox.question(
@@ -181,15 +143,15 @@ class RepoPage(QWidget):
             )
         if reply == QMessageBox.StandardButton.Yes:
             if self.programType == "Studio":
-                if removeProjectFromDB(self.user, project_obj):
-                    self.refresh_project_list()
+                if client_api.api_removeProjectFromDB(self.user, project_obj.id):
                     guiSetAuditLog(self, "Repository")
+                    self.refresh_project_list()
                 else:
                     QMessageBox.warning(self, "Error", "Could not delete project.")
             elif self.programType == "Code":
-                if removeCodeFileFromDB(self.user, project_obj):
-                    self.refresh_project_list()
+                if client_api.api_removeProjectFromDB(self.user, project_obj.id):
                     guiSetAuditLog(self, "Repository")
+                    self.refresh_project_list()
                 else:
                     QMessageBox.warning(self, "Error", "Could not delete project.")
 
@@ -198,7 +160,7 @@ class RepoPage(QWidget):
             self.project_callback(project_obj,self.programType)
 
     def handle_audit_toggle(self):
-        guiExpandAuditLog(self, "Repo")
+        guiExpandAuditLog(self, "Repository")
 
     def showEvent(self, event):
         super().showEvent(event)

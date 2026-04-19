@@ -95,13 +95,6 @@ class VersionFile(models.Model):
         verbose_name = "Version File"
 
 
-class VersionComment(models.Model):
-    version = models.ForeignKey(ProjectVersion, on_delete=models.CASCADE)
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    body = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-
-
 class AuditLog(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     project = models.ForeignKey(Project, on_delete=models.SET_NULL, null=True)

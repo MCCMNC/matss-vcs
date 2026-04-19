@@ -1,27 +1,9 @@
 from pathlib import PureWindowsPath
-
-from DBFunctions import *
-import os
-import django
-import PyQt6
-from PyQt6.QtWidgets import QMessageBox, QFileIconProvider
-from PyQt6.QtCore import Qt, QFileInfo
-from PyQt6.QtWidgets import (
-    QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
-    QMessageBox
-)
-from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QLineEdit, QListWidget
-from PyQt6.QtGui import QFont, QPixmap, QIcon
-from PyQt6.QtWidgets import QPushButton, QMessageBox
+from PyQt6.QtCore import QFileInfo
+from PyQt6.QtGui import QPixmap, QIcon
 
 from GUI_DiffPanel import DiffPanel
-import requests
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-django.setup()
-
-from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
+from GUIHelperWindows import *
 
 import client_api
 
@@ -79,21 +61,19 @@ def gui_buildBottomRow(inputWidget,inputWidgetType):
     inputWidget.button_row_layout.addWidget(inputWidget.back_btn)
     if inputWidgetType == "Repository" or inputWidgetType == "Project"or inputWidgetType == "ProjectVersion":
         print(inputWidgetType + " Attempting to Build 'Manage Users' Button")
-        is_admin = RepositoryMembership.objects.filter(
-            user=inputWidget.user,
-            repository=inputWidget.currentRepository.id,
-            repo_role="Admin"
-        ).exists()
-        # TODO : ADD USER REMOVAL FUNCTIONALITY TO MANAGE USERS WIDGET AND FILTER HERE
-        inputWidget.manageUsers_btn = QPushButton("Manage Users")
-        inputWidget.manageUsers_btn.setFixedSize(120, 30)
-        inputWidget.manageUsers_btn.setStyleSheet(
-            "background: #133347; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
-        inputWidget.manageUsers_btn.clicked.connect(inputWidget.handleManageUsers)
-        inputWidget.button_row_layout.addWidget(inputWidget.manageUsers_btn)
-        print(inputWidgetType + " Successfully Built 'Manage Users' Button")
-
+        currentUserRoleInRepo = client_api.getUserRole_Client(inputWidget.user.id,
+                                                              inputWidget.currentRepository.id)
+        is_admin = False
+        if currentUserRoleInRepo == "Admin":
+            is_admin = True
         if is_admin:
+            inputWidget.manageUsers_btn = QPushButton("Manage Users")
+            inputWidget.manageUsers_btn.setFixedSize(120, 30)
+            inputWidget.manageUsers_btn.setStyleSheet(
+                "background: #133347; color: #b9c2c9; border: 1px solid #0d1115; font-weight: bold;")
+            inputWidget.manageUsers_btn.clicked.connect(inputWidget.handleManageUsers)
+            inputWidget.button_row_layout.addWidget(inputWidget.manageUsers_btn)
+            print(inputWidgetType + " Successfully Built 'Manage Users' Button")
             print(inputWidgetType + " Attempting to Build 'Add Users' Button")
             inputWidget.addUser_btn = QPushButton("Add Users")
             inputWidget.addUser_btn.setFixedSize(120, 30)
@@ -131,7 +111,7 @@ def gui_buildDesign(inputWidget,inputWidgetType,inputProgramType = "Studio"):
         inputWidget.pfp.setFixedSize(60, 60)
         inputWidget.pfp.setStyleSheet("border: none; background: transparent;")
         BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-        pfp_path = os.path.join(BASE_DIR, "Assets", "Poet Cover 3.png")
+        pfp_path = os.path.join(BASE_DIR, "Assets", "Default User PFP.png")
         raw_pixmap = QPixmap(pfp_path)
         if not raw_pixmap.isNull():
             inputWidget.cached_pixmap = raw_pixmap.scaled(60, 60, Qt.AspectRatioMode.KeepAspectRatio,
@@ -209,19 +189,30 @@ def gui_buildDesign(inputWidget,inputWidgetType,inputProgramType = "Studio"):
         inputWidget.right_spacer.setFixedWidth(350)
         inputWidget.middle_layout.addWidget(inputWidget.right_spacer)
     inputWidget.main_layout.addLayout(inputWidget.middle_layout)
+    if inputWidgetType != "Dashboard" :
+        inputWidget.handleAddUser = lambda: gui_handleAddUser(inputWidget)
+        inputWidget.handleManageUsers = lambda: gui_handleManageUsers(inputWidget)
     print(inputWidgetType + " Passed GUI Build")
 
-def guiUserLogin(inputUsername,inputPassword):#####
-    potentialUser = User.objects.filter(username = inputUsername).first() # Potential issue: if the username does not exist, potentialUser will be None
-    if potentialUser is None or potentialUser.password_hash != inputPassword:
-        return None
-    userLogIn(potentialUser)
-    return potentialUser
+
+def guiUserLogin(inputUsername, inputPassword):
+    # Create the payload for the server
+    credentials = {
+        'username': inputUsername,
+        'password': inputPassword
+    }
+
+    # Hit the API endpoint
+    response_data = client_api.login_request(credentials)
+
+    if response_data:
+        # response_data is now the dictionary with id, username, and role
+        return response_data
+
+    return None
 
 def auditLogToText(entry):
-    if entry.project is None:
-        return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.action} ({entry.details})"
-    return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.action} ({entry.project.title})"
+    return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → ({entry.details})"
 def auditLogToTextExtended(entry):
     if entry.project is None:
         return f" {entry.timestamp.strftime('%Y-%m-%d %H:%M:%S')} → {entry.action} ({entry.details})"
@@ -285,13 +276,11 @@ def guiSetAuditLog(inputWidget, inputWidgetType):
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.repo_name}")
         print("getting repo audit logs thru api")
         logs = client_api.getRepoAuditLogsByRepo_Client(inputWidget.currentRepository.id)
-        #logs = getRepoAuditLogsByRepo(inputWidget.currentRepository)
 
     elif inputWidgetType == "Project":
         inputWidget.audit_label.setText(f"Audit Log for : {inputWidget.project_data.title}")
         print("getting project audit logs api")
         logs = client_api.getProjectAuditLogs_Client(inputWidget.project_data.id)
-        #logs = getProjectAuditLogs(inputWidget.project_data.id)
 
     elif inputWidgetType == "ProjectVersion":
         inputWidget.audit_label.setText(
@@ -309,21 +298,25 @@ def guiSetAuditLog(inputWidget, inputWidgetType):
     print(inputWidgetType + " Successfully set Audit Log")
 
 def guiExpandAuditLog(inputWidget, inputInstruction):
-    if inputInstruction not in ["Dashboard", "Repo", "Project", "ProjectVersion"] or getattr(inputWidget, '_is_toggling', False):
+    if inputInstruction not in ["Dashboard", "Repository", "Project", "ProjectVersion"] or getattr(inputWidget, '_is_toggling', False):
         return
 
     inputWidget._is_toggling = True
     expand = not inputWidget.is_expanded
     inputWidget.audit_container.setFixedWidth(inputWidget.width() - 40 if expand else 350)
     inputWidget.center_container.setVisible(not expand)
-    inputWidget.right_spacer.setVisible(not expand)
+    if inputInstruction != "Project" :
+        inputWidget.right_spacer.setVisible(not expand)
+    else :
+        if inputWidget.programType == "Code":
+            inputWidget.diff_panel.setVisible(not expand)
     inputWidget.expand_btn.setText("Minimise Audit Log" if expand else "Expand Audit Log")
 
     if expand:
-        # 1. Determine which logs to fetch based on the page type
+        # 1. Refresh logs
         if inputInstruction == "Dashboard":
             logs = client_api.getUserAuditLogs_Client(inputWidget.user.id)
-        elif inputInstruction == "Repo":
+        elif inputInstruction == "Repository":
             logs = client_api.getRepoAuditLogsByRepo_Client(inputWidget.currentRepository.id)
         elif inputInstruction == "Project":
             logs = client_api.getProjectAuditLogs_Client(inputWidget.project_data.id)
@@ -350,7 +343,10 @@ def getItemIcons(inputDBElements, inputItemsType):
     
     for item in inputDBElements:
         rel_path = client_api.getElementRelativePath_Client(item.id, inputItemsType)
+        if rel_path.startswith("config"):
+            rel_path = rel_path[7:]
         rel_path = PureWindowsPath(rel_path).as_posix()
+        print(rel_path)
         file_info = QFileInfo(rel_path)
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
@@ -484,16 +480,44 @@ def guiLocalDeviceHasDefaultProgram(ext):
 import os
 from datetime import datetime
 
-def guiCreateProjectFromDrop(user, inputRepo_obj, title, desc, source_path):
+def guiCreateProjectFromDrop(user, inputRepo_map, title, desc, source_path):
     try:
         user_id=user.id
-        repo_id = inputRepo_obj.id
-
+        repo_id = inputRepo_map.id
         return client_api.addProjectAndInitialVersion_Upload_Client(user_id, repo_id, title, desc, source_path)
 
     except Exception as e:
         print(f"GUI Drop operation failed: {e}")
         return False
 
+def gui_handleAddUser(inputWidget):
+    dialog = AddUserDialog(inputWidget)
+    if dialog.exec() == QDialog.DialogCode.Accepted:
+        username, role = dialog.get_data()
+
+        if not username:
+            QMessageBox.warning(inputWidget, "Input Error", "Please enter a username.")
+            return
+
+        # 1. Prepare data for the API
+        repo_id = inputWidget.currentRepository.id
+        admin_id = inputWidget.user.id # Assuming you store the logged-in user here
+
+        # 2. Call the server
+        response = client_api.addRepoMember_Client(username, role, repo_id, admin_id)
+
+        # 3. Handle the response
+        if response and 'error' not in response:
+            status_msg = response.get('status', 'Added/Updated')
+            QMessageBox.information(inputWidget, "Success", f"{status_msg} {username} as {role}.")
+        else:
+            error_msg = response.get('error') if response else "Server connection failed."
+            QMessageBox.critical(inputWidget, "Error", f"Could not add user: {error_msg}")
+
+
+def gui_handleManageUsers(inputWidget):
+    """Displays the list of all users associated with this repository."""
+    dialog = ManageUsersDialog(inputWidget.currentRepository, inputWidget)
+    dialog.exec()
 def formatWidget(inputWidget):
     formatWidgetSlashes(inputWidget)

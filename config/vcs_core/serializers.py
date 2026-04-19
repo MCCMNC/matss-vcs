@@ -38,12 +38,6 @@ class VersionFileSerializer(serializers.ModelSerializer):
         fields = '__all__'
         depth = 1
 
-class VersionCommentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = VersionComment
-        fields = '__all__'
-        depth = 1
-
 class AuditLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AuditLog

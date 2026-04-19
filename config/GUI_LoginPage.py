@@ -1,19 +1,4 @@
-import sys
-import os
-import django
-
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QPushButton,
-    QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget
-)
-from PyQt6.QtGui import QPixmap, QIcon
-
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-django.setup()
-
 from GUIFunctions import *
-from vcs_core.models import User, Project, ProjectVersion, VersionFile, AuditLog
 
 class LoginPage(QWidget):
     def __init__(self, login_success_callback):

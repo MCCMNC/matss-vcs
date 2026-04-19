@@ -1,17 +1,6 @@
 import os
-import django
 import difflib
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QTextEdit
-from PyQt6.QtGui import QFont
-
-# --- DJANGO SETUP ---
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-try:
-    django.setup()
-except Exception:
-    pass
-
-# Опитваме импорт на Pygments
 try:
     from pygments import highlight
     from pygments.lexers import get_lexer_for_filename, TextLexer
@@ -21,26 +10,23 @@ try:
 except ImportError:
     PYGMENTS_AVAILABLE = False
 
-from DBFunctions import databaseStoragePath
-
-
 class DiffPanel(QWidget):
     def __init__(self, versions):
         super().__init__()
         self.setFixedWidth(400)
-        # Сортираме версиите по номер
+        # Sorting versions by version_number
         self.versions = sorted(versions, key=lambda x: x.version_number)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 0, 0, 0)
 
-        # Контейнер за избор на версии
+        # Version choice container
         header_layout = QHBoxLayout()
         self.combo_left = QComboBox()
         self.combo_right = QComboBox()
         self.combo_right.setEnabled(False)
 
-        self.combo_left.addItem("Избери Версия 1", None)
+        self.combo_left.addItem("Choose First", None)
         for v in self.versions:
             self.combo_left.addItem(f"Ver {v.version_number}", v)
 
@@ -51,15 +37,17 @@ class DiffPanel(QWidget):
         header_layout.addWidget(self.combo_right)
         layout.addLayout(header_layout)
 
-        # Прозорец за показване на Diff
+        # Diff window
         self.diff_display = QTextEdit()
         self.diff_display.setReadOnly(True)
         self.diff_display.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
-        # Стилизация в стила на GitHub Dark
+        # Style
         self.diff_display.setStyleSheet("""
             QTextEdit {
                 background-color: #0d1117;
                 color: #c9d1d9;
+
+
                 border: 1px solid #30363d;
                 border-radius: 6px;
             }
@@ -69,83 +57,111 @@ class DiffPanel(QWidget):
     def on_left_changed(self, index):
         v1 = self.combo_left.currentData()
         self.combo_right.clear()
-        self.combo_right.addItem("Избери Версия 2", None)
+        self.combo_right.addItem("Choose Second (Compare)", None)
 
         if v1:
             self.combo_right.setEnabled(True)
             for v in self.versions:
-                # Показваме само по-нови версии в десния комбобокс
                 if v.version_number > v1.version_number:
                     self.combo_right.addItem(f"Ver {v.version_number}", v)
         else:
             self.combo_right.setEnabled(False)
 
+        # Trigger the display update even if v2 isn't chosen yet
+        self.update_diff()
+
     def update_diff(self):
         v1 = self.combo_left.currentData()
         v2 = self.combo_right.currentData()
 
-        if not v1 or not v2:
+        if not v1:
             self.diff_display.clear()
             return
 
-        # ВАЖНО: Тук Django обектите трябва да имат поле 'path'
-        path1 = os.path.join(databaseStoragePath, v1.path)
-        path2 = os.path.join(databaseStoragePath, v2.path)
+        self.diff_display.document().setDocumentMargin(0)
+
+        def resolve_path(version_obj):
+            current_file_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(current_file_dir)
+            repo_path = os.path.normpath(version_obj.project.repository.path)
+            if repo_path.startswith("config"):
+                return os.path.normpath(os.path.join(project_root, repo_path, version_obj.path))
+            return os.path.normpath(os.path.join(repo_path, version_obj.path))
 
         try:
-            # Четем файловете с 'ignore' на грешките за бинарни файлове
+            path1 = resolve_path(v1)
             with open(path1, 'r', encoding='utf-8', errors='ignore') as f:
                 text1 = f.readlines()
-            with open(path2, 'r', encoding='utf-8', errors='ignore') as f:
-                text2 = f.readlines()
 
-            diff = list(difflib.unified_diff(
-                text1, text2,
-                fromfile=f'V{v1.version_number}',
-                tofile=f'V{v2.version_number}'
-            ))
+            formatter = HtmlFormatter(nowrap=True, style='monokai', noclasses=True)
 
-            if not diff:
-                self.diff_display.setHtml("<b style='color:gray; padding:10px;'>Няма открити разлики.</b>")
-                return
-
-            # Настройваме синтактичния анализатор
             lexer = TextLexer()
-            formatter = HtmlFormatter(nowrap=True)
             if PYGMENTS_AVAILABLE:
                 try:
-                    # Използваме името на файла за определяне на езика
                     lexer = get_lexer_for_filename(v1.path)
                 except:
                     lexer = TextLexer()
 
-            html_output = "<pre style='margin:0; font-family: Consolas, monospace; font-size: 9pt;'>"
+            html_rows = []
 
-            for line in diff:
-                # Ескейпваме символи за HTML безопасност
-                clean_line = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            # 2. Process Lines
+            if not v2:
+                # --- SINGLE VIEW MODE ---
+                for line in text1:
+                    h_line = highlight(line, lexer, formatter) if PYGMENTS_AVAILABLE else line.replace('<', '&lt;')
+                    html_rows.append(
+                        f"<tr><td style='width:25px;'> </td><td style='white-space:pre; color:#c9d1d9; padding:0 5px;'>{h_line}</td></tr>")
+            else:
+                # --- DIFF VIEW MODE ---
+                path2 = resolve_path(v2)
+                with open(path2, 'r', encoding='utf-8', errors='ignore') as f:
+                    text2 = f.readlines()
 
-                # Обработка на съдържанието за подчертаване
-                content = line[1:] if len(line) > 1 else ""
-                highlighted_content = highlight(content, lexer, formatter) if PYGMENTS_AVAILABLE else clean_line[1:]
+                diff = list(difflib.unified_diff(text1, text2, n=3))
 
-                if line.startswith('+'):
-                    html_output += f"<div style='background-color: #1a361e; color:#3fb950;'>+ {highlighted_content}</div>"
-                elif line.startswith('-'):
-                    html_output += f"<div style='background-color: #3b1a1a; color:#f85149;'>- {highlighted_content}</div>"
-                elif line.startswith('@@'):
-                    html_output += f"<div style='color:#8b949e; background-color: #161b22;'>{clean_line}</div>"
-                else:
-                    # За нормалните редове подчертаваме целия ред
-                    highlighted_full = highlight(line, lexer, formatter) if PYGMENTS_AVAILABLE else clean_line
-                    html_output += f"<div>{highlighted_full}</div>"
+                for line in diff:
+                    if not line: continue
+                    indicator = line[0]
+                    content = line[1:]
 
-            html_output += "</pre>"
+                    # Table cell styles
+                    base_td = "padding: 0px 5px; font-family: Consolas, monospace; font-size: 9.5pt; vertical-align: middle; border: none;"
+                    sign_td = f"{base_td} width: 20px; text-align: center; font-weight: bold;"
+                    code_td_style = f"{base_td} white-space: pre;"
 
-            style_defs = formatter.get_style_defs('.highlight') if PYGMENTS_AVAILABLE else ""
-            full_html = f"<style>{style_defs}</style>{html_output}"
+                    if indicator == '+':
+                        sign_html = f"<td style='{sign_td} background-color: #238636; color: #ffffff;'>+</td>"
+                        h_line = highlight(content, lexer, formatter) if PYGMENTS_AVAILABLE else content.replace('<',
+                                                                                                                 '&lt;')
+                        code_html = f"<td style='{code_td_style} color: #aff5b4;'>{h_line}</td>"
+                    elif indicator == '-':
+                        sign_html = f"<td style='{sign_td} background-color: #da3633; color: #ffffff;'>-</td>"
+                        h_line = highlight(content, lexer, formatter) if PYGMENTS_AVAILABLE else content.replace('<',
+                                                                                                                 '&lt;')
+                        code_html = f"<td style='{code_td_style} color: #ffa198;'>{h_line}</td>"
+                    elif indicator == '@':
+                        sign_html = f"<td style='{sign_td} color: #8b949e;'> </td>"
+                        code_html = f"<td style='{code_td_style} color: #8b949e; background-color: #161b22;'>{line.replace('<', '&lt;')}</td>"
+                    else:
+                        sign_html = f"<td style='{sign_td} color: #484f58;'> </td>"
+                        h_line = highlight(line, lexer, formatter) if PYGMENTS_AVAILABLE else line.replace('<', '&lt;')
+                        code_html = f"<td style='{code_td_style} color: #c9d1d9;'>{h_line}</td>"
 
+                    html_rows.append(f"<tr>{sign_html}{code_html}</tr>")
+
+            # 3. Final HTML Assembly
+            table_content = "".join(html_rows)
+            # Clean background-color: #0d1117; on the body is the key to no yellow
+            full_html = f"""
+            <html>
+            <body style="background-color: #0d1117; margin: 0; padding: 0;">
+                <table cellspacing="0" cellpadding="0" style="border-collapse: collapse; width: 100%; background-color: #0d1117;">
+                    {table_content}
+                </table>
+            </body>
+            </html>
+            """
             self.diff_display.setHtml(full_html)
 
         except Exception as e:
-            self.diff_display.setPlainText(f"Грешка при четене на файловете: {e}\nПът: {path1}")
+            self.diff_display.setPlainText(f"Error: {e}")

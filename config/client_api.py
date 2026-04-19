@@ -74,10 +74,21 @@ def getProjectVersionAuditLogsByID_Client(inputProjectVersionID):
 
 def getRepoAuditLogsByRepoName_Client(repo_name):
     return _api_call('GET', f'repos/name/{repo_name}/logs/')
+def getUserRole_Client(user_id,repository_id):
+    """
+        Fetches the role of a specific user within a specific repository.
+        """
+    payload = {
+        'user_id': user_id,
+        'repo_id': repository_id
+    }
+    # result will be a Map object like {'role': 'Admin'}
+    result = _api_call('GET', '/repos/membership/role/', data=payload)
 
+    return result.role if result else "Guest"
 #POST
 def addProjectAndInitialVersion_Upload_Client(user_id, repo_id, title, description, local_file_path):
-    url = f"{BASE_URL}/projects/create-with-initial/"
+    url = f"{BASE_URL}/projects/create-with-initial-drop/"
     try:
         with open(local_file_path, 'rb') as f:
             files = {'file': f}
@@ -86,7 +97,8 @@ def addProjectAndInitialVersion_Upload_Client(user_id, repo_id, title, descripti
                 'repo_id': repo_id,
                 'title': title,
                 'description': description,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now().isoformat(),
+                'filePath':local_file_path
             }
 
             response = requests.post(url, data=data, files=files)
@@ -164,3 +176,118 @@ def getRepoProjectsByRepo_Client(repo_id):
 
 def getLatestProjectVersion_Client(project_id):
     return _api_call('GET', f'/projects/{project_id}/latest-version/')
+
+def getLatestApprovedProjectVersion_Client(project_id):
+    return _api_call('GET', f'/projects/{project_id}/latest-approved-version/')
+
+import requests
+
+
+def api_create_repository(user,repo_name, folder_path,program_type):
+    """
+    Sends a request to the server view to execute DBFunctions.createRepositoryInDB
+    """
+    url = f"{BASE_URL}/repositories/create/"  # Match the URL in your urls.py
+
+    payload = {
+        "user_id": user.id,
+        "title": repo_name,
+        "inputPath": folder_path,
+        "repoType": program_type
+    }
+
+    try:
+        response = requests.post(url, json=payload)
+
+        if response.status_code == 201:
+            print(f"Server Success: {response.json().get('message')}")
+            return True
+        else:
+            print(f"Server Error ({response.status_code}): {response.text}")
+            return False
+
+    except Exception as e:
+        print(f"Connection Error: {e}")
+        return False
+def api_removeProjectVersionFromDB(user, version_obj):
+    """
+        Calls the DELETE view to remove a specific project version.
+        URL: /api/versions/<version_id>/delete/
+        """
+    payload = {
+        'user_id': user.id
+    }
+
+    # Matching the URL pattern: path('versions/<int:version_id>/delete/', ...)
+    return _api_call('DELETE', f'/versions/{version_obj.id}/delete/', data=payload)
+def api_removeProjectFromDB(user, projectID):
+    """
+    Calls the DELETE view to wipe a specific project (Code File) from the DB.
+    URL: /api/projects/<project_id>/delete/
+    """
+    payload = {
+        'user_id': user.id
+    }
+
+    # Matching your route: path('projects/<int:project_id>/delete/', views.removeProjectFromDB_View)
+    return _api_call('DELETE', f'/projects/{projectID}/delete/', data=payload)
+def updateProjectVersionStatus_Client(version_id, new_status="Approved"):
+    """
+    Sends a POST request to update the status of a specific version.
+    """
+    payload = {
+        'status': new_status
+    }
+    # Matches the URL: /api/versions/<id>/update-status/
+    return _api_call('POST', f'/versions/{version_id}/update-status/', data=payload)
+def getRepoMembers_Client(repo_id):
+    """
+    Fetches all members and their roles for a specific repository.
+    """
+    # URL: /api/repos/<repo_id>/members/
+    return _api_call('GET', f'/repos/{repo_id}/members/')
+def updateMemberRole_Client(membership_id, new_role):
+    """
+    Updates the role of a specific membership record.
+    """
+    payload = {'role': new_role}
+    return _api_call('POST', f'/repos/membership/{membership_id}/update-role/', data=payload)
+
+
+def login_request(credentials):
+    """
+    Sends a login request to the server.
+    'credentials' should be a dict: {'username': '...', 'password': '...'}
+    """
+    try:
+        # Update the URL path to match your server's routing
+        endpoint = "/api/login/"
+
+        # Making the POST call to the server
+        response = _api_call('POST', endpoint, data=credentials)
+
+        if response:
+            # The server should return the user object (id, username, role, etc.)
+            print(f"Login successful for: {response.get('username')}")
+            return response
+        else:
+            print("Login failed: Invalid credentials or server error.")
+            return None
+
+    except Exception as e:
+        print(f"Connection Error during login: {e}")
+        return None
+def addRepoMember_Client(username, role, repo_id, admin_id):
+    payload = {
+        'username': username,
+        'role': role,
+        'repository_id': repo_id,
+        'admin_id': admin_id
+    }
+    return _api_call('POST', '/repos/add-member/', data=payload)
+def logout_request(user_id):
+    """
+    Tells the server to set the user's loginStatus to 0.
+    """
+    payload = {'user_id': user_id}
+    return _api_call('POST', '/api/logout/', data=payload)

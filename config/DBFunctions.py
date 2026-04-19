@@ -16,6 +16,7 @@ databaseStoragePath = "Dummy Host Storage Folder"
 def getUserAuditLogs(inputUserID):
     return AuditLog.objects.filter(user_id=inputUserID).order_by("timestamp")
 def getProjectAuditLogs(inputProjectID):
+    print("got to project audit log view ",inputProjectID)
     return AuditLog.objects.filter(project_id=inputProjectID).order_by("timestamp")
 
 def getProjectByID(inputProjectID):
@@ -109,7 +110,6 @@ def logCreateProjectVersion(inputUser, inputProject, inputVersion):
     )
 
 
-# NEW
 def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage, inputPath):
     try:
         with transaction.atomic():
@@ -195,7 +195,7 @@ def removeVersionFileFromDB(inputUser, inputFileObj, inputVersion):
                 user=inputUser,
                 project=project,
                 project_version=inputVersion,
-                repository_id=inputVersion.project.repository_id,
+                repository_id=inputVersion.project.repository.id,
                 action="DELETE_VERSION_FILE",
                 details=f"Removed {inputFileObj.path} from {project.title} v{inputVersion.version_number}"
             )
@@ -205,11 +205,12 @@ def removeVersionFileFromDB(inputUser, inputFileObj, inputVersion):
     except Exception as e:
         print(f"Error during version file removal: {e}")
 def logRemoveProject(inputUser, inputProject):
+    studioOrCode = inputProject.repository.repoType
     AuditLog.objects.create(
         user = inputUser,
-        repository_id = inputProject.repository_id,
+        repository_id = inputProject.repository.id,
         action = "REMOVE_PROJECT",
-        details = f"REMOVED Project '{inputProject.title}' and all associated versions from database"
+        details = f"{inputUser.username} REMOVED {studioOrCode} '{inputProject.title}' and all its versions"
     )
 def deleteAllProjectAuditLogs(project_obj): #TODO : MIGHT BE UNUSED
     AuditLog.objects.filter(project_id=project_obj.pk).delete()
@@ -248,7 +249,26 @@ def removeProjectFromDB(user, project_obj, deletingRepo=False):
             else : logRemoveProject(user, project_obj)
             versions = ProjectVersion.objects.filter(project=project_obj)
             for version in versions:
+                print("version : ", version.version_number)
                 removeProjectVersionFromDB(user, version, deletingProject=True)
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            repo_path = os.path.normpath(project_obj.repository.path)
+            file_rel_path = project_obj.path.lstrip('\\/')
+            projectPath = ""
+            if project_obj.repository.path.startswith("config"):
+                projectPath = os.path.normpath(os.path.join(project_root, repo_path, file_rel_path))
+            else:
+                projectPath = os.path.normpath(os.path.join(repo_path, file_rel_path))
+            if projectPath:
+                print("Deleting ProjectVersion at : " + projectPath)
+                if os.path.exists(projectPath):
+                    try:
+                        os.remove(projectPath)
+                        print(f"Physical storage deleted: {projectPath}")
+                    except OSError as file_error:
+                        # We print but don't necessarily crash the DB transaction
+                        # unless you want strict parity between DB and Disk
+                        print(f"Warning: Could not delete physical path: {file_error}")
             project_obj.delete()
             return True
     except Exception as e:
@@ -287,9 +307,11 @@ def getUserRepos(inputUser, repoType="Studio"):
     Returns repositories of a specific type that the input user
     has a membership in.
     """
+    from django.db.models import Q
+
     return Repository.objects.filter(
-        repositorymembership__user=inputUser,
-        repoType=repoType
+        Q(repositorymembership__user=inputUser) & ~Q(repositorymembership__repo_role="Removed"),
+        repoType=repoType  # This keyword argument MUST be last
     ).distinct()
 def getRepoProjectsByRepo(repo_obj):
     return Project.objects.filter(repository_id=repo_obj.id)
@@ -356,6 +378,22 @@ def getLatestProjectVersion(project):
     ).order_by('-version_number').first()
 
     return latest_version
+def getLatestApprovedProjectVersion(projectID):
+    """
+    Given a Project instance, returns the latest ProjectVersion
+    based on the highest version number.
+    """
+    from vcs_core.models import ProjectVersion
+
+    if not projectID:
+        return None
+
+    # Get the version with the highest version_number
+    latest_approved_version = ProjectVersion.objects.filter(
+        project_id=projectID, status="Approved"
+    ).order_by('-version_number').first()
+
+    return latest_approved_version
 def getVersionFileByPath(inputPath):
     try:
         return VersionFile.objects.filter(path=inputPath).first()
@@ -392,19 +430,27 @@ def logRemoveProjectVersion(inputUser, inputProject, inputVersion):
     AuditLog.objects.create(
         user=inputUser,
         project=inputProject,
-        repository_id=inputProject.repository.pk,
+        repository_id=inputProject.repository.id,
         action="REMOVE_VERSION",
         details=f"DELETED {inputProject.title} v{inputVersion.version_number} from database"
     )
 
 from django.db import transaction
 # Replace with this version (cleaned + consistent)
-def removeProjectVersionFromDB(inputUser, inputVersion, deletingProject=False):
+def removeProjectVersionFromDB(inputUser, inputVersionMap, deletingProject=False):
     try:
         with transaction.atomic():
+            inputVersion = ProjectVersion.objects.get(id = inputVersionMap.id)
             m2m_attr = 'version_files' if hasattr(inputVersion, 'version_files') else 'files'
             associated_files = list(getattr(inputVersion, m2m_attr).all())
-
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            repo_path = os.path.normpath(inputVersion.project.repository.path)
+            file_rel_path = inputVersion.path.lstrip('\\/')
+            versionPath = ""
+            if inputVersion.project.repository.path.startswith("config"):
+                versionPath = os.path.normpath(os.path.join(project_root, repo_path, file_rel_path))
+            else:
+                versionPath = os.path.normpath(os.path.join(repo_path, file_rel_path))
             files_to_actually_delete = []
 
             for f in associated_files:
@@ -413,6 +459,17 @@ def removeProjectVersionFromDB(inputUser, inputVersion, deletingProject=False):
                     files_to_actually_delete.append(f)
             if not deletingProject :
                 logRemoveProjectVersion(inputUser, inputVersion.project,inputVersion)
+
+            if inputVersion.path:
+                print("Deleting ProjectVersion at : " + versionPath)
+                if os.path.exists(versionPath):
+                    try:
+                        os.remove(versionPath)
+                        print(f"Physical storage deleted: {versionPath}")
+                    except OSError as file_error:
+                        # We print but don't necessarily crash the DB transaction
+                        # unless you want strict parity between DB and Disk
+                        print(f"Warning: Could not delete physical path: {file_error}")
             inputVersion.delete()
             for orphaned_file in files_to_actually_delete:
                 orphaned_file.delete()
@@ -424,7 +481,8 @@ def removeProjectVersionFromDB(inputUser, inputVersion, deletingProject=False):
 def addProjectAndInitialVersionToDB(user, repo_obj, title, desc, filePath, timestamp):
     try:
         # 1. Create the Project
-        print("DB ADDED filePath "+filePath)
+        print(filePath)
+        print("DB ADDED filePath " + filePath)
         new_proj = Project.objects.create(
             title=title,
             description=desc,
@@ -471,153 +529,208 @@ def checkAbsPathToCodeFile(project_obj, abs_path):
         print(f"Path mismatch: {filename_from_abs} != {filename_from_project}")
         return False
 
-
-def addNextCodeFileVersionToDB(inputProject, inputAuthor, inputMessage, localPath):
+def addNextCodeFileVersionToDB(inputProjectMap, inputAuthorMap, inputMessage, localPath):
     """
-    Takes a file from localPath, copies it into the repository storage
-    as the new 'current' file, and creates a versioned backup (_N).
+    Handles the physical file versioning and database registration.
+    Prevents overwriting by calculating the next version number first.
     """
-
     try:
-        # --- 1. Path Normalization for the Repository ---
-        base_storage = os.path.normpath(databaseStoragePath)
-        print(1)
+        # --- 1. RESOLVE ABSOLUTE PROJECT ROOT ---
+        # Get the path to 'matss-vcs' (Project Root)
+        # Assuming this file/server is running from the 'config' folder
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_file_dir)
+
+        inputProject = Project.objects.get(id = inputProjectMap.id)
         repo_obj = inputProject.repository
-        
-        repo_rel_path = os.path.normpath(repo_obj.path)
+        # repo_obj.path should be 'config/Dummy Host Storage Folder/RepoName_ID'
+        repo_path_str = os.path.normpath(repo_obj.path)
 
-        if repo_rel_path.startswith(base_storage):
-            repo_base_disk_path = repo_rel_path
-        else:
-            repo_base_disk_path = os.path.join(base_storage, repo_rel_path)
-        print(2)
-        # --- 2. Determine Version Number ---
-        latestCodeFileVer = (
-            ProjectVersion.objects
-            .filter(project_id=inputProject.id)
-            .order_by("-version_number")
-            .first()
-        )
-        next_version_num = 1 if not latestCodeFileVer else latestCodeFileVer.version_number + 1
-        print(3)
-        # --- 3. Define Internal Repository Paths ---
-        # inputProject.path is the relative path within the repo (e.g., 'src/main.py')
-        internal_rel_path = inputProject.path
+        # This creates the absolute path: C:/.../matss-vcs/config/Dummy Host Storage Folder/Repo_ID
+        repo_base_disk_path = os.path.normpath(os.path.join(project_root, repo_path_str))
 
-        # This is where the file lives inside your Managed Storage
-        full_repo_destination = os.path.normpath(os.path.join(repo_base_disk_path, internal_rel_path))
+        # --- 2. CALCULATE NEXT VERSION ---
 
-        # Create the versioned filename for history (e.g., 'src/main_2.py')
-        file_dir = os.path.dirname(internal_rel_path)
-        file_name = os.path.basename(internal_rel_path)
-        name, ext = os.path.splitext(file_name)
+        last_version = ProjectVersion.objects.filter(project_id=inputProject.id).order_by('-version_number').first()
+        next_v = (last_version.version_number + 1) if last_version else 1
 
-        relative_versioned_path = os.path.join(file_dir, f"{name}_{next_version_num}{ext}").replace('\\', '/')
-        full_versioned_backup_path = os.path.normpath(os.path.join(repo_base_disk_path, relative_versioned_path))
-        print(4)
-        # --- 4. Physical File Operations ---
-        if not os.path.exists(localPath):
-            print(f"Error: User's local file not found at {localPath}")
-            return None
-        print(5)
-        # A. Copy from User's Computer to the Main Repo Location (Updates 'main.py')
-        shutil.copy2(localPath, full_repo_destination)
+        # --- 3. DEFINE FILENAMES ---
+        # filePath in DB is 'src/main.py' or just 'main.py'
+        # We need the relative folder structure inside the repo
+        relative_file_dir = os.path.dirname(inputProject.path)
+        filename_only = os.path.basename(inputProject.path)
+        name, ext = os.path.splitext(filename_only)
 
-        # B. Copy from the Main Repo Location to the Versioned File (Creates 'main_2.py')
-        shutil.copy2(full_repo_destination, full_versioned_backup_path)
+        # The physical file names
+        versioned_filename = f"{name}_{next_v}{ext}"
 
-        print(f"Imported {localPath} to {full_repo_destination}")
-        print(f"Created version backup at {full_versioned_backup_path}")
+        # Absolute paths for the OS to use
+        # The 'Master' file (the one that always represents the latest state)
+        full_master_path = os.path.normpath(os.path.join(repo_base_disk_path, inputProject.path))
+        # The 'Versioned' file (the historical snapshot)
+        full_versioned_path = os.path.normpath(os.path.join(repo_base_disk_path, relative_file_dir, versioned_filename))
 
-        # --- 5. Database Transaction ---
+        # Relative path for the DB (portable)
+        relative_versioned_db_path = os.path.join(relative_file_dir, versioned_filename).replace('\\', '/')
+
+        print(f"DEBUG: Versioning {filename_only} to version {next_v}")
+        print(f"DEBUG: Target Backup Path -> {full_versioned_path}")
+
+        # --- 4. PHYSICAL FILE OPERATIONS ---
+        # Ensure the subdirectories inside the repo exist (e.g., Repo_ID/src/)
+        os.makedirs(os.path.dirname(full_versioned_path), exist_ok=True)
+
+        # A. Copy the local file into the Repo as the 'Master' (the latest live version)
+        shutil.copy2(localPath, full_master_path)
+
+        # B. Copy that master to the versioned backup (the historical record)
+        shutil.copy2(full_master_path, full_versioned_path)
+
+        # --- 5. DATABASE TRANSACTION ---
         with transaction.atomic():
-            # Determine Approval Status
-            final_status = "Draft"
-            is_admin = RepositoryMembership.objects.filter(
-                user=inputAuthor,
-                repository_id=repo_obj.id,
-                repo_role="Admin"
-            ).exists()
+            # Update the main project timestamp
+            inputProject.created_at = timezone.now()
+            inputProject.save()
 
-            if is_admin:
-                final_status = "Approved"
-
-            # Create the next ProjectVersion pointing to the _N file
-            currentVersion = ProjectVersion.objects.create(
-                project_id=inputProject.id,
-                version_number=next_version_num,
-                author=inputAuthor,
-                path=relative_versioned_path,  # Path to the _N file
+            # Create the specific version entry
+            new_version = ProjectVersion.objects.create(
+                project=inputProject,
+                version_number=next_v,
+                author_id=inputAuthorMap.id,
+                path=relative_versioned_db_path,
                 message=inputMessage,
-                status=final_status,
-                created_at=timezone.now()
+                created_at=timezone.now(),
+                status="Approved"  # Or logic based on roles
             )
-
-        return currentVersion
+            AuditLog.objects.get_or_create(
+                user_id=inputAuthorMap.id,
+                project=inputProject,
+                action="CREATE_CODEFILE_VERSION",
+                details=f"{inputAuthorMap.username} created {inputProject.title} v{new_version.version_number}",
+                project_version_id=new_version.pk,
+                repository_id = new_version.project.repository.id
+            )
+        print(f"SUCCESS: Created version {next_v} for {inputProject.title}")
+        return new_version
 
     except Exception as e:
-        print(f"Failed to import and version file: {e}")
+        print(f"CRITICAL ERROR in addNextCodeFileVersionToDB: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 def logAddCodeFileToDB(inputUser,inputCodeFile):
     AuditLog.objects.get_or_create(
         user_id=inputUser.pk,
         project_id = inputCodeFile.pk,
-        repository_id=inputCodeFile.repository_id,
+        repository_id=inputCodeFile.repository.id,
         action="CREATE_CODEFILE",
         details=f"ADDED {inputCodeFile.title} to {inputCodeFile.repository.title}"
     )
     AuditLog.objects.get_or_create(
         user_id=inputUser.pk,
         project_id = inputCodeFile.pk,
-        repository_id=inputCodeFile.repository_id,
+        repository_id=inputCodeFile.repository.id,
         project_version_id = ProjectVersion.objects.filter(project_id=inputCodeFile.pk).first().pk,
         action="CREATE_CODEFILE_VERSION",
         details=f"ADDED INITIAL VERSION to {inputCodeFile.title}"
     )
 
 
-def addInitialCodeFileToDB(user, repo_obj, title, filePath, timestamp):
-    """
-    Copies the original file to a versioned name (filename_1.ext)
-    and creates the Project and ProjectVersion entries in the DB.
-    """
+def addInitialCodeFileDrop(user, repo_obj, title, actual_source_path, relative_repo_path, timestamp=None):
+    if timestamp is None:
+        timestamp = timezone.now()
+
     try:
-        # --- 1. Path Normalization & Correction ---
-        # Normalize to prevent "Folder\Folder" duplication
+        # 1. Resolve Storage Paths
         base_storage = os.path.normpath(databaseStoragePath)
-        repo_rel_path = os.path.normpath(repo_obj.path)
+        repo_path_str = os.path.normpath(repo_obj.path)
+        project_root = os.path.dirname(base_storage)
 
-        # If the repo path already starts with the base storage path, don't join them
-        if repo_rel_path.startswith(base_storage):
-            repo_base_disk_path = repo_rel_path
+        if repo_path_str.startswith("config"):
+            repo_base_disk_path = os.path.join(project_root, repo_path_str)
         else:
-            repo_base_disk_path = os.path.join(base_storage, repo_rel_path)
+            repo_base_disk_path = os.path.join(base_storage, repo_path_str)
 
-        # --- 2. Define Physical Source and Destination ---
-        # full_source_path is the actual file currently sitting on disk
-        full_source_path = os.path.normpath(os.path.join(repo_base_disk_path, filePath))
-
-        # Create the versioned filename (e.g., main.py -> main_1.py)
-        file_dir = os.path.dirname(filePath)
-        file_name = os.path.basename(filePath)
+        # 2. Setup Versioned Paths (e.g., test.txt -> test_1.txt)
+        file_dir = os.path.dirname(relative_repo_path)
+        file_name = os.path.basename(relative_repo_path)
         name, ext = os.path.splitext(file_name)
-
+        relative_project_path = os.path.join(file_dir, f"{name}{ext}").replace('\\', '/')
+        full_project_path = os.path.normpath(os.path.join(repo_base_disk_path,relative_project_path))
         relative_versioned_path = os.path.join(file_dir, f"{name}_1{ext}").replace('\\', '/')
         full_versioned_path = os.path.normpath(os.path.join(repo_base_disk_path, relative_versioned_path))
 
-        # --- 3. Physical File Operations ---
-        if not os.path.exists(full_source_path):
-            print(f"Error: Physical file not found at {full_source_path}")
+        # 3. PHYSICAL FILE OPERATION
+        if not os.path.exists(actual_source_path):
+            print(f"ERROR: Source file not found on D: drive: {actual_source_path}")
             return False
 
-        # Copy the file to the new versioned name
-        shutil.copy2(full_source_path, full_versioned_path)
-        print(f"File Versioned: {full_source_path} -> {full_versioned_path}")
+        # Create the folder structure in your Dummy Host storage first
+        dest_dir = os.path.dirname(full_versioned_path)
+        if not os.path.exists(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
 
-        # --- 4. Database Transaction ---
+        # Copy and Rename: From D:/.../test.txt to Storage/.../test_1.txt
+        shutil.copy2(actual_source_path, full_project_path)
+        shutil.copy2(actual_source_path, full_versioned_path)
+        # Verify the copy worked
+        if not os.path.exists(full_versioned_path):
+            print(f"FAILED: File was not written to {full_versioned_path}")
+            return False
+
+        # 4. DATABASE ENTRIES
         with transaction.atomic():
-            # Create the Project (The main tracking entry)
-            # title is the relative path (e.g., 'src/main.py')
+            new_codeFile = Project.objects.create(
+                title=title,
+                description="Initial Import",
+                owner=user,
+                repository=repo_obj,
+                path=relative_repo_path,  # e.g. "test.txt"
+                created_at=timestamp
+            )
+
+            is_admin = RepositoryMembership.objects.filter(
+                user=user,
+                repository=repo_obj,
+                repo_role="Admin"
+            ).exists()
+
+            ProjectVersion.objects.create(
+                project=new_codeFile,
+                version_number=1,
+                author=user,
+                path=relative_versioned_path,  # e.g. "test_1.txt"
+                message="Initial Import",
+                created_at=timestamp,
+                status="Approved" if is_admin else "Draft"
+            )
+        return True
+
+    except Exception as e:
+        print(f"FAILED addInitialCodeFileDrop: {e}")
+        return False
+def addInitialCodeFileToDB(user, repo_obj, title, filePath, timestamp):
+    try:
+        base_storage = os.path.normpath(databaseStoragePath)
+        repo_path_str = os.path.normpath(repo_obj.path)
+        project_root = os.path.dirname(base_storage)
+        if repo_path_str.startswith("config"):
+            repo_base_disk_path = os.path.join(project_root, repo_path_str)
+        else:
+            repo_base_disk_path = os.path.join(base_storage, repo_path_str)
+
+        repo_base_disk_path = os.path.normpath(repo_base_disk_path)
+        full_source_path = os.path.normpath(os.path.join(repo_base_disk_path, filePath))
+        file_dir = os.path.dirname(filePath)
+        file_name = os.path.basename(filePath)
+        name, ext = os.path.splitext(file_name)
+        relative_versioned_path = os.path.join(file_dir, f"{name}_1{ext}").replace('\\', '/')
+        full_versioned_path = os.path.normpath(os.path.join(repo_base_disk_path, relative_versioned_path))
+        if not os.path.exists(full_source_path):
+            print(f"ERROR: File not found for indexing: {full_source_path}")
+            return False
+        shutil.copy2(full_source_path, full_versioned_path)
+        with transaction.atomic():
             new_codeFile = Project.objects.create(
                 title=title,
                 description="Initial Import",
@@ -626,15 +739,11 @@ def addInitialCodeFileToDB(user, repo_obj, title, filePath, timestamp):
                 path=filePath,
                 created_at=timestamp
             )
-
-            # Create Version 1 (Pointing to the _1 file)
-            finalStatus = "Draft"
-            can_approve = RepositoryMembership.objects.filter(
-                user= user,
+            is_admin = RepositoryMembership.objects.filter(
+                user=user,
                 repository=repo_obj,
-                repo_role__in=["Admin"]
+                repo_role="Admin"
             ).exists()
-            if can_approve:finalStatus = "Approved"
             ProjectVersion.objects.create(
                 project=new_codeFile,
                 version_number=1,
@@ -642,90 +751,94 @@ def addInitialCodeFileToDB(user, repo_obj, title, filePath, timestamp):
                 path=relative_versioned_path,
                 message="Initial Import",
                 created_at=timestamp,
-                status = finalStatus
+                status="Approved" if is_admin else "Draft"
             )
-
-        # Use your existing logging function
-        logAddCodeFileToDB(user, new_codeFile)
         return True
 
     except Exception as e:
-        print(f"DB Entry or File Copy failed for {title}: {e}")
+        print(f"FAILED addInitialCodeFileToDB: {e}")
         return False
-def createRepositoryInDB(user, title, inputPath, repoType = "Studio"):
+
+
+def createRepositoryInDB(user, title, inputPath, repoType="Studio"):
+    print(f"\n>>> STARTING REPO CREATION: {title} ({repoType})")
     try:
         with transaction.atomic():
-            db_creationPath = "Unknown Repo Type"
-            if repoType == "Studio" : db_creationPath = inputPath
-            elif repoType == "Code": db_creationPath = "To Be Determined"
+            # 1. DB Entry
+            repoTitle = title
             new_repo = Repository.objects.create(
-                title=title,
-                path=db_creationPath,
-                description=f"CURRENTLY UNIMPLEMENTED",
-                repoType = repoType
+                title=repoTitle,
+                path="To Be Determined",
+                description="Initial Import",
+                repoType=repoType
             )
-            RepositoryMembership.objects.create(
-                user=user,
-                repository=new_repo,
-                repo_role="Admin"
-            )
+            print(f"STEP 1: DB Object created with PK: {new_repo.pk}")
+
+            # 2. Permissions
+            RepositoryMembership.objects.create(user=user, repository=new_repo, repo_role="Admin")
+            print("STEP 2: Admin membership created.")
+
+            if repoType == "Code":
+                print("STEP 3: Detected 'Code' type. Starting path logic...")
+
+                # Derive the project root
+                # Assumes databaseStoragePath is: .../matss-vcs/Dummy Host Storage Folder
+                project_root = os.path.dirname(os.path.abspath(databaseStoragePath))
+                folder_name = f"{title}_{new_repo.pk}"
+
+                # This puts it in matss-vcs/config/Dummy Host Storage Folder/...
+                repo_disk_path = os.path.normpath(
+                    os.path.join(project_root, "config", "Dummy Host Storage Folder", folder_name))
+                repo_db_path = os.path.join("config", "Dummy Host Storage Folder", folder_name).replace("\\", "/")
+
+                new_repo.path = repo_db_path
+                new_repo.save()
+                print(f"STEP 4: Path calculated: {repo_disk_path}")
+
+                # 3. Physical Copy
+                if not os.path.exists(inputPath):
+                    print(f"!!! FAILURE: Source path does not exist: {inputPath}")
+                    return False
+
+                os.makedirs(os.path.dirname(repo_disk_path), exist_ok=True)
+                print(f"STEP 5: Directory structure ready. Copying files...")
+
+                shutil.copytree(inputPath, repo_disk_path, symlinks=True, dirs_exist_ok=True)
+                print("STEP 6: shutil.copytree finished.")
+
+                # Inside createRepositoryInDB
+                print(f"Indexing started for: {repo_disk_path}")
+                databaseStorageFilePaths = []
+                for root, dirs, files in os.walk(repo_disk_path):
+                    for filename in files:
+                        # SKIP the versioned files we create so we don't index them twice
+                        if filename.endswith("_1") or "_1." in filename:
+                            continue
+
+                        abs_path = os.path.join(root, filename)
+                        rel_path = os.path.relpath(abs_path, repo_disk_path).replace("\\", "/")
+                        databaseStorageFilePaths.append(rel_path)
+
+                print(f"Files found: {len(databaseStorageFilePaths)}")
+
+                current_time = timezone.now()
+                for codeFilePath in databaseStorageFilePaths:
+                    # Use the filename as the title
+                    title = os.path.basename(codeFilePath)
+                    success = addInitialCodeFileToDB(user, new_repo, title, codeFilePath, current_time)
             AuditLog.objects.create(
                 user=user,
-                action="CREATE_REPOSITORY",
-                repository_id=new_repo.id,
-                details=f"Created Repository '{title}' at {inputPath}"
+                action="CREATE_REPO",
+                repository_id = new_repo.pk,
+                details=f"{user.username} Created Repository '{repoTitle}'"
             )
-            if repoType == "Code":
-                # 1. Define the new path using the primary key to ensure uniqueness
-                new_repo.path = os.path.join(databaseStoragePath, f"{title}_{new_repo.pk}")
-                new_repo.save()
-
-                print(f"Attempting to copy all files from: {inputPath} to: {new_repo.path}")
-
-                try:
-                    # 2. Check if the source path actually exists
-                    if not os.path.exists(inputPath):
-                        print(f"Source path error: {inputPath} does not exist.")
-                        # Handle error (e.g., delete the DB entry or raise exception)
-                    else:
-                        # 3. Copy the entire tree
-                        # symlinks=True preserves symbolic links instead of copying the target file
-                        # dirs_exist_ok=True allows the copy even if the folder was somehow pre-created
-                        shutil.copytree(inputPath, new_repo.path, symlinks=True, dirs_exist_ok=True)
-                        print("Repository structure successfully recreated at new path.")
-
-                except Exception as e:
-                    print(f"Failed to copy repository files: {e}")
-                    # Logic for rollback if needed (e.g., new_repo.delete())
-
-                print(f"Attempting to add all files from: {new_repo.path} to: DB Tracking")
-
-                databaseStorageFilePaths = []
-
-                try:
-                    # os.walk yields a 3-tuple: (current_folder_path, subfolders, files_in_folder)
-                    for root, dirs, files in os.walk(new_repo.path):
-                        for filename in files:
-                            # 1. Get the absolute path of the file
-                            absolute_file_path = os.path.join(root, filename)
-                            # 2. Calculate the path relative to the new_repo.path
-                            relative_path = os.path.relpath(absolute_file_path, new_repo.path)
-                            # 3. Store or process the relative path
-                            databaseStorageFilePaths.append(relative_path)
-
-                    print(f"Successfully indexed {len(databaseStorageFilePaths)} files for DB tracking.")
-                except Exception as e:
-                    print(f"Error while indexing files: {e}")
-                current_time = timezone.now()
-                print("Attempting to add all CODE FILES to DB")
-                for codeFilePath in databaseStorageFilePaths:
-                    """(user, repo_obj, title, filePath, timestamp)"""
-                    addInitialCodeFileToDB(user, new_repo, codeFilePath, codeFilePath,current_time)
-                print("SUCCESSFULLY ADDED all CODE FILES to DB")
-            print(f"Successfully created repository: {title}")
+            print(">>> SUCCESS: Repository creation sequence finished.")
             return True
+
     except Exception as e:
-        print(f"Database Error during repository creation: {e}")
+        print(f"!!! CRITICAL EXCEPTION: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -741,7 +854,7 @@ def removeRepositoryFromDB(user, repo_obj,repoType = "Studio"):
             AuditLog.objects.create(
                 user=user,
                 action="DELETE_REPO",
-                details=f"Permanently deleted Repository '{repo_title}'"
+                details=f"{user.username} Permanently deleted Repository '{repo_title}'"
             )
             repo_storage_path = repo_obj.path
             if repoType == "Code" and repo_storage_path and repo_storage_path != "unknown":

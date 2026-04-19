@@ -1,3 +1,5 @@
+from datetime import timezone
+
 from django.shortcuts import get_object_or_404, render
 from rest_framework.response import Response
 from rest_framework import status
@@ -159,7 +161,7 @@ def removeProjectFromDB_View(request, project_id):
     user = get_object_or_404(User, pk=request.data.get('user_id'))
     project_obj = get_object_or_404(Project, pk=project_id)
     deleting_repo = request.data.get('deleting_repo', False)
-
+    print("got here")
     success = DBFunctions.removeProjectFromDB(user, project_obj, deleting_repo)
 
     if success:
@@ -189,6 +191,7 @@ def getRepoProjectsByRepo_View(request, repo_id):
 
 @api_view(['GET'])
 def getRepoAuditLogsByRepo_View(request, repo_id):
+    print("got to repo audit logs view ",repo_id)
     repo_obj = get_object_or_404(Repository, pk=repo_id)
     logs = DBFunctions.getRepoAuditLogsByRepo(repo_obj)
     serializer = AuditLogSerializer(logs, many=True)
@@ -259,6 +262,15 @@ def getLatestProjectVersion_View(request, project_id):
     serializer = ProjectVersionSerializer(latest)
     return Response(serializer.data)
 
+
+@api_view(['GET'])
+def getLatestApprovedProjectVersion_View(request, project_id):
+    latest = DBFunctions.getLatestApprovedProjectVersion(project_id)
+    if not latest:
+        return Response({"message": "No versions found for this project"}, status=404)
+    serializer = ProjectVersionSerializer(latest)
+    return Response(serializer.data)
+
 @api_view(['GET'])
 def getVersionFileByPath_View(request):
     # Using query params because paths can contain slashes that break URLs
@@ -309,22 +321,71 @@ def removeProjectVersionFromDB_View(request, version_id):
         return Response(status=status.HTTP_204_NO_CONTENT)
     return Response({"error": "Failed to delete version"}, status=500)
 
+@api_view(['POST'])
+def addProjectAndInitialVersionDrop_View(request):
+    data = request.data
+    user = get_object_or_404(User, pk=data.get('user_id'))
+    repo = get_object_or_404(Repository, pk=data.get('repo_id'))
 
+    # Ensure we have a timestamp (if client doesn't send one, use server time)
+    timestamp = data.get('timestamp') or timezone.now()
+
+    # Path extraction
+    full_source_path = data.get('filePath')  # e.g., "D:/MyFolder/script.py"
+
+    # We want the file to live in the root of the repo by default,
+    # or you can extract a relative path if the GUI sends one.
+    relative_path = os.path.basename(full_source_path)
+
+    if repo.repoType == "Studio":
+        success = DBFunctions.addProjectAndInitialVersionToDB(
+            user,
+            repo,
+            data.get('title'),
+            data.get('description'),
+            full_source_path,
+            timestamp
+        )
+    else:
+        # Now passing all required positional arguments:
+        # actual_source_path=full_source_path
+        # relative_repo_path=relative_path
+        # timestamp=timestamp
+        success = DBFunctions.addInitialCodeFileDrop(
+            user,
+            repo,
+            data.get('title'),
+            full_source_path,  # actual_source_path
+            relative_path,  # relative_repo_path
+            timestamp  # timestamp (The missing argument!)
+        )
+
+    if success:
+        return Response({"message": "Project and Version 1 created"}, status=status.HTTP_201_CREATED)
+
+    return Response({"error": "Database entry failed"}, status=500)
 @api_view(['POST'])
 def addProjectAndInitialVersionToDB_View(request):
     data = request.data
     user = get_object_or_404(User, pk=data.get('user_id'))
     repo = get_object_or_404(Repository, pk=data.get('repo_id'))
-
-    success = DBFunctions.addProjectAndInitialVersionToDB(
-        user, 
-        repo, 
-        data.get('title'), 
-        data.get('description'), 
-        data.get('filePath'), 
-        data.get('timestamp')
-    )
-
+    if repo.repoType == "Studio":
+        success = DBFunctions.addProjectAndInitialVersionToDB(
+            user,
+            repo,
+            data.get('title'),
+            data.get('description'),
+            data.get('filePath'),
+            data.get('timestamp')
+        )
+    else :
+        success = DBFunctions.addInitialCodeFileToDB(
+            user,
+            repo,
+            data.get('title'),
+            data.get('filePath'),
+            data.get('timestamp')
+        )
     if success:
         return Response({"message": "Project and Version 1 created"}, status=status.HTTP_201_CREATED)
     return Response({"error": "Database entry failed"}, status=500)
@@ -400,24 +461,6 @@ def addInitialCodeFileToDB_View(request):
     
     return Response({"error": "Failed to initialize code file in DB"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['POST'])
-def createRepositoryInDB_View(request):
-    data = request.data
-    user = get_object_or_404(User, pk=data.get('user_id'))
-    
-    repo_type = data.get('repo_type', 'Studio')
-    
-    success = DBFunctions.createRepositoryInDB(
-        user, 
-        data.get('title'), 
-        data.get('input_path'), 
-        repo_type
-    )
-    
-    if success:
-        return Response({"message": f"Repository '{data.get('title')}' created and indexed"}, status=status.HTTP_201_CREATED)
-    return Response({"error": "Failed to create repository"}, status=500)
-
 @api_view(['DELETE'])
 def removeRepositoryFromDB_View(request, repo_id):
     user = get_object_or_404(User, pk=request.data.get('user_id'))
@@ -429,3 +472,192 @@ def removeRepositoryFromDB_View(request, repo_id):
     if success:
         return Response({"message": "Repository and all associated data permanently deleted"}, status=status.HTTP_204_NO_CONTENT)
     return Response({"error": "Failed to delete repository"}, status=500)
+
+
+@api_view(['POST'])
+def createRepositoryInDB_View(request):
+    """
+    Directly bridges the API to DBFunctions.createRepositoryInDB
+    """
+    data = request.data
+
+    # 1. Get the User object (required for the function)
+    user_id = data.get('user_id')
+    user = get_object_or_404(User, pk=user_id)
+
+    # 2. Extract the raw string data
+    title = data.get('title')
+    input_path = data.get('inputPath')
+    repo_type = data.get('repoType', 'Code')  # Default to Code if not specified
+
+    if not title or not input_path:
+        return Response(
+            {"error": "Missing title or inputPath"},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # 3. Call your function directly
+    # This will trigger the shutil.copytree and the addInitialCodeFileToDB loop
+    success = DBFunctions.createRepositoryInDB(
+        user=user,
+        title=title,
+        inputPath=input_path,
+        repoType=repo_type
+    )
+
+    # 4. Return response based on the boolean returned by your function
+    if success:
+        return Response(
+            {"message": f"Repository '{title}' created and indexed successfully."},
+            status=status.HTTP_201_CREATED
+        )
+    else:
+        return Response(
+            {"error": "Failed to create repository. Check server console for errors."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+@api_view(['GET'])
+def getUserRole_View(request):
+    user_id = request.GET.get('user_id')
+    repo_id = request.GET.get('repo_id')
+    try:
+        membership = RepositoryMembership.objects.get(
+            user_id=user_id,
+            repository_id=repo_id
+        )
+        return Response({'role': membership.repo_role}, status=200)
+    except RepositoryMembership.DoesNotExist:
+        return Response({'role': 'None'}, status=200)
+    except Exception as e:
+        return Response({'error': str(e)}, status=400)
+
+
+@api_view(['POST'])
+def updateProjectVersionStatus_View(request, version_id):
+    try:
+        # 1. Find the real DB object
+        version = ProjectVersion.objects.get(id=version_id)
+
+        # 2. Get the new status from request data
+        new_status = request.data.get('status', 'Approved')
+
+        # 3. Update and Save
+        version.status = new_status
+        version.save(update_fields=['status'])
+
+        return Response({'message': f'Version status updated to {new_status}'}, status=status.HTTP_200_OK)
+
+    except ProjectVersion.DoesNotExist:
+        return Response({'error': 'Version not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+def getRepoMembers_View(request, repo_id):
+    try:
+        # Optimized query using select_related to get user data in one go
+        memberships = RepositoryMembership.objects.filter(
+            repository_id=repo_id
+        ).select_related('user')
+
+        member_list = []
+        for m in memberships:
+            member_list.append({
+                'id' : m.id,
+                'user_id': m.user.id,
+                'username': m.user.username,
+                'role': m.repo_role,
+                'joined_at': m.joined_at if hasattr(m, 'joined_at') else None
+            })
+
+        return Response(member_list, status=200)
+    except Exception as e:
+        return Response({'error': str(e)}, status=400)
+
+
+@api_view(['POST'])
+def updateMemberRole_View(request, m_id):
+    try:
+        membership = RepositoryMembership.objects.get(id=m_id)
+        new_role = request.data.get('role')
+
+        if new_role not in ["Admin", "Reviewer", "Author", "Guest", "Removed"]:
+            return Response({'error': 'Invalid role'}, status=400)
+
+        membership.repo_role = new_role
+        membership.save(update_fields=['repo_role'])
+        return Response({'message': 'Role updated'}, status=200)
+    except RepositoryMembership.DoesNotExist:
+        return Response({'error': 'Membership not found'}, status=404)
+
+
+@api_view(['POST'])
+def login_view(request):
+    # 1. Get data from the client request
+    username = request.data.get('username')
+    password = request.data.get('password')
+
+    # 2. Find the user
+    potential_user = User.objects.filter(username=username).first()
+
+    # 3. Apply your specific logic
+    if potential_user is None or potential_user.password_hash != password:
+        return Response({'error': 'Invalid username or password'}, status=401)
+
+    # 4. Success - Return user data to the GUI
+    # Note: userLogIn(potential_user) should happen here on the server
+    DBFunctions.userLogIn(potential_user)
+
+    return Response({
+        'id': potential_user.id,
+        'username': potential_user.username,
+        'role': potential_user.role  # Useful for your GUI logic
+    }, status=200)
+
+
+@api_view(['POST'])
+def addRepoMember_View(request):
+    username = request.data.get('username')
+    role = request.data.get('role')
+    repo_id = request.data.get('repository_id')
+    admin_id = request.data.get('admin_id')  # The person performing the action
+
+    try:
+        # 1. Check if user exists
+        target_user = User.objects.get(username=username)
+
+        # 2. Update or Create membership
+        membership, created = RepositoryMembership.objects.update_or_create(
+            user=target_user,
+            repository_id=repo_id,
+            defaults={'repo_role': role}
+        )
+
+        # 3. Log the action to AuditLog
+        AuditLog.objects.create(
+            user_id=admin_id,
+            action="ADD_MEMBER",
+            repository_id=repo_id,
+            details=f"Added {username} as {role}"
+        )
+
+        status = "Added" if created else "Updated"
+        return Response({'message': f'Successfully {status} {username}', 'status': status}, status=200)
+
+    except User.DoesNotExist:
+        return Response({'error': f"User '{username}' not found."}, status=404)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+
+@api_view(['POST'])
+def logout_view(request):
+    user_id = request.data.get('user_id')
+
+    try:
+        user = User.objects.get(id=user_id)
+        user.loginStatus = 0
+        user.save()
+        return Response({'message': 'Logged out successfully'}, status=200)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=404)
