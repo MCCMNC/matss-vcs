@@ -9,7 +9,7 @@ class User(models.Model):
     ]
 
     username = models.CharField(max_length=150, unique=True)
-    email = models.EmailField(unique=True)
+    email = models.EmailField()
     password_hash = models.CharField(max_length=255)
     # KEEPING THIS FOR COMPATIBILITY: Acts as a 'Global' or 'Default' role
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)

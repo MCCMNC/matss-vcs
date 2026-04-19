@@ -700,15 +700,15 @@ def register_user_view(request):
     try:
         # --- THE FIX: HASH THE PASSWORD HERE ---
         hashed_pw = hash_password(password)
-
         new_user = User.objects.create(
             username=username,
             email=email if email else "no email",
-            password_hash=hashed_pw, # Store the salted hash
+            password_hash=hashed_pw,
             role="UNUSED",
             loginStatus=0,
-            created_at=timezone.now()
+            created_at = timezone.now()
         )
+        print("created user")
         return Response({'message': 'Registration successful'}, status=201)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
