@@ -135,7 +135,11 @@ class ProjectPage(QWidget):
 
         repo_root = os.path.normpath(os.path.abspath(repo_path_raw))
         user_id = self.user.get('id') if isinstance(self.user, dict) else self.user.id
-
+        currentUserRoleInRepo = client_api.getUserRole_Client(self.user.id, self.currentRepository.id)
+        can_edit = (currentUserRoleInRepo in ["Admin", "Author"])
+        if not can_edit:
+            QMessageBox.warning(self, "Error", "You cannot upload to this repository.")
+            return
         for url in urls:
             abs_path = os.path.normpath(url.toLocalFile())
             if os.path.isfile(abs_path):
