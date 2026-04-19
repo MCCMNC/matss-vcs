@@ -2,7 +2,7 @@ import os
 import wave
 import numpy as np
 import random
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt,QTimer
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QFrame, QSlider

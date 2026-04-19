@@ -489,13 +489,11 @@ def createRepositoryInDB_View(request):
     title = data.get('title')
     input_path = data.get('inputPath')
     repo_type = data.get('repoType', 'Code')  # Default to Code if not specified
-
     if not title or not input_path:
         return Response(
             {"error": "Missing title or inputPath"},
             status=status.HTTP_400_BAD_REQUEST
         )
-
     # 3. Call your function directly
     # This will trigger the shutil.copytree and the addInitialCodeFileToDB loop
     success = DBFunctions.createRepositoryInDB(

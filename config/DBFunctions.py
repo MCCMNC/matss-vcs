@@ -823,6 +823,9 @@ def createRepositoryInDB(user, title, inputPath, repoType="Studio"):
                     # Use the filename as the title
                     title = os.path.basename(codeFilePath)
                     success = addInitialCodeFileToDB(user, new_repo, title, codeFilePath, current_time)
+            else :
+                new_repo.path = inputPath
+                new_repo.save()
             AuditLog.objects.create(
                 user=user,
                 action="CREATE_REPO",

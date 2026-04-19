@@ -3,6 +3,7 @@ from GUIFunctions import *
 from DBFunctions import *
 from GUI_FileItemWidget import FileItemWidget
 from GUIHelperWindows import ManageUsersDialog
+from GUI_AudioSupport import AudioPlayerWidget
 
 
 class ProjectVersionPage(QWidget):
@@ -23,7 +24,7 @@ class ProjectVersionPage(QWidget):
         self.handleAddUSer = "TO BE OVERWRITTEN"
         gui_buildDesign(self, "ProjectVersion")
         gui_buildBottomRow(self,"ProjectVersion")
-
+        self.audio_player = AudioPlayerWidget()
     # -------------------- Handlers --------------------
 
     def showEvent(self, event):
@@ -51,16 +52,28 @@ class ProjectVersionPage(QWidget):
         if not file_obj or not file_obj.path:
             return
 
-        repo_path_raw = self.project_version.project.repository.path
+        # Using the IDs we serverized earlier if file_obj is a dict
+        path_val = file_obj.get('path') if isinstance(file_obj, dict) else file_obj.path
+
+        # Get Repo Root (handling dict/object safety)
+        if isinstance(self.project_version, dict):
+            repo_path_raw = self.project_version['project']['repository']['path']
+        else:
+            repo_path_raw = self.project_version.project.repository.path
+
         repo_root = os.path.normpath(os.path.abspath(repo_path_raw))
-        full_path = os.path.join(repo_root, file_obj.path)
+        full_path = os.path.join(repo_root, path_val)
 
         audio_exts = ['.wav', '.mp3', '.flac', '.aac', '.ogg', '.m4a']
 
         if os.path.splitext(full_path)[1].lower() in audio_exts:
             if os.path.exists(full_path):
-                self.audio_player.show()
-                self.audio_player.load_file(full_path, os.path.basename(full_path))
+                # CHECK: Does the attribute actually exist on 'self'?
+                if hasattr(self, 'audio_player') and self.audio_player is not None:
+                    self.audio_player.show()
+                    self.audio_player.load_file(full_path, os.path.basename(full_path))
+                else:
+                    QMessageBox.critical(self, "Player Error", "Audio player was not initialized.")
             else:
                 QMessageBox.warning(self, "Missing File", f"File not found:\n{full_path}")
         else:
