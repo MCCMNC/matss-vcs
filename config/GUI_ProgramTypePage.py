@@ -1,6 +1,13 @@
 from GUIFunctions import *
 class ProgramTypePage(QWidget):
     def __init__(self, loginUser, program_choice_callback):
+        """
+        Initializes the selection page where users choose between Studio or Code management modes.
+
+        Args:
+            loginUser (dict/obj): The user data passed from the login screen.
+            program_choice_callback (function): The method in MainWindow to trigger after a choice is made.
+        """
         super().__init__()
         self.loginUser = loginUser  # Store the user to pass back later
         self.program_choice_callback = program_choice_callback
@@ -44,6 +51,7 @@ class ProgramTypePage(QWidget):
                     }
                     QPushButton:hover { background-color: #79c0ff; }
                 """)
+
         # Connect to the choice handler
         self.dashboard_btn.clicked.connect(self.handle_studioChoice)
         self.alt_dashboard_btn.clicked.connect(self.handle_codeChoice)
@@ -55,13 +63,15 @@ class ProgramTypePage(QWidget):
         main_layout.addWidget(container)
 
     def handle_codeChoice(self):
-        # Trigger the callback with the stored user object
+        """Triggers the navigation callback specifically requesting the 'Code' management environment."""
         if self.program_choice_callback:
-            self.program_choice_callback(self.loginUser,"Code")
+            self.program_choice_callback(self.loginUser, "Code")
+
     def handle_studioChoice(self):
-        # Trigger the callback with the stored user object
+        """Triggers the navigation callback for the default 'Studio' management environment."""
         if self.program_choice_callback:
             self.program_choice_callback(self.loginUser)
 
     def showEvent(self, event):
+        """Standard override for the widget's show event, ensuring base class logic is executed when the page appears."""
         super().showEvent(event)

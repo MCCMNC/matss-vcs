@@ -8,6 +8,7 @@ from GUI_AudioSupport import AudioPlayerWidget
 
 class ProjectVersionPage(QWidget):
     def __init__(self, loginUser, inputProjectVersion, back_callback, logout_callback, pfp_pixmap=None):
+        """Initializes the version detail page, sets up UI layouts, and instantiates the audio player for media files."""
         super().__init__()
         self.user = loginUser
         self.project_version = inputProjectVersion
@@ -22,40 +23,46 @@ class ProjectVersionPage(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"ProjectVersionPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
         self.handleAddUSer = "TO BE OVERWRITTEN"
+
         gui_buildDesign(self, "ProjectVersion")
-        gui_buildBottomRow(self,"ProjectVersion")
+        gui_buildBottomRow(self, "ProjectVersion")
         self.audio_player = AudioPlayerWidget()
+
     # -------------------- Handlers --------------------
 
     def showEvent(self, event):
+        """Standard show event override that refreshes the file list and updates audit logs when the page appears."""
         super().showEvent(event)
         try:
             self.refresh_file_list()
             guiSetAuditLog(self, "ProjectVersion")
         except Exception as e:
             print(f"ProjectVersionPage refresh failed: {e}")
+
     def handleManageUsers(self):
-        """Displays the list of all users associated with this repository."""
+        """Launches a dialog to view and manage user permissions associated with the current repository."""
         dialog = ManageUsersDialog(self.currentRepository, self)
         dialog.exec()
+
     def handle_back_click(self):
+        """Stops any active audio playback and triggers the callback to return to the previous project view."""
         if hasattr(self, 'audio_player'):
             self.audio_player.player.stop()
         self.back_callback()
 
     def handle_logout_click(self):
+        """Stops audio playback and triggers the global logout sequence."""
         if hasattr(self, 'audio_player'):
             self.audio_player.player.stop()
         self.logout_callback()
 
     def handle_file_open(self, file_obj):
+        """Determines file type to either launch in the integrated audio player or open via the system's default application."""
         if not file_obj or not file_obj.path:
             return
 
-        # Using the IDs we serverized earlier if file_obj is a dict
         path_val = file_obj.get('path') if isinstance(file_obj, dict) else file_obj.path
 
-        # Get Repo Root (handling dict/object safety)
         if isinstance(self.project_version, dict):
             repo_path_raw = self.project_version['project']['repository']['path']
         else:
@@ -68,7 +75,6 @@ class ProjectVersionPage(QWidget):
 
         if os.path.splitext(full_path)[1].lower() in audio_exts:
             if os.path.exists(full_path):
-                # CHECK: Does the attribute actually exist on 'self'?
                 if hasattr(self, 'audio_player') and self.audio_player is not None:
                     self.audio_player.show()
                     self.audio_player.load_file(full_path, os.path.basename(full_path))
@@ -83,6 +89,7 @@ class ProjectVersionPage(QWidget):
                 QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
 
     def eventFilter(self, source, event):
+        """Intercepts drag and drop events specifically for the file list area to facilitate file uploads."""
         if source is self.middleList and event.type() == event.Type.DragEnter:
             if event.mimeData().hasUrls():
                 event.acceptProposedAction()
@@ -93,76 +100,51 @@ class ProjectVersionPage(QWidget):
         return super().eventFilter(source, event)
 
     def handle_file_drop(self, event):
+        """Processes files dropped into the version, checking for authorization, resolving paths, and handling duplicate file links."""
         print("\n--- [DEBUG] START handle_file_drop ---")
         project = getattr(self.project_version, 'project', None)
         target_repo = None
         if project:
             target_repo = getattr(project, 'repository', None)
 
-        # 1. Auth Check
         auth = False
         if target_repo:
             currentUserRoleInRepo = client_api.getUserRole_Client(self.user.id, target_repo.id)
-            print(f"[DEBUG] User Role: {currentUserRoleInRepo}")
             if currentUserRoleInRepo in ["Admin", "Author"]:
                 auth = True
 
         if not auth:
-            print("[DEBUG] FAILED: User not authorized for this repo")
             QMessageBox.warning(self, "Error", "You cannot upload to this repository.")
             return
 
         urls = event.mimeData().urls()
-        print(f"[DEBUG] Found {len(urls)} URLs in drop event")
         files_added = False
 
-        # 2. Resolve Repo Root
         try:
             repo_path_raw = self.project_version.project.repository.path
             repo_root = os.path.normpath(os.path.abspath(repo_path_raw))
-            print(f"[DEBUG] Repo Root resolved to: {repo_root}")
         except Exception as e:
-            print(f"[DEBUG] FAILED: Could not resolve repo root: {e}")
             return
 
         for url in urls:
             abs_dropped_path = os.path.normpath(url.toLocalFile())
-            print(f"\n[DEBUG] Processing file: {abs_dropped_path}")
-
             if os.path.isfile(abs_dropped_path):
-                # --- PATH LOGIC ---
                 try:
                     relative_path = os.path.relpath(abs_dropped_path, repo_root)
-                    print(f"[DEBUG] Calculated relpath: {relative_path}")
                     if relative_path.startswith(".."):
-                        print("[DEBUG] Path is outside repo; falling back to basename")
                         relative_path = os.path.basename(abs_dropped_path)
-                except ValueError as e:
-                    print(f"[DEBUG] Drive mismatch detected ({e}); falling back to basename")
+                except ValueError:
                     relative_path = os.path.basename(abs_dropped_path)
 
                 relative_path = relative_path.replace('\\', '/')
-                print(f"[DEBUG] Final Relative Path for DB: {relative_path}")
-
-                # 3. Duplicate / Link Check
-                print(f"[DEBUG] Checking DB for existing path: {relative_path}")
                 existing_file = getVersionFileByPath(relative_path)
 
                 if existing_file:
-                    print(f"[DEBUG] Match found in DB (ID: {existing_file.id})")
-                    try:
-                        already_linked = isFileLinkedToVersion(existing_file, self.project_version)
-                        print(f"[DEBUG] Already linked to this version? {already_linked}")
-                    except Exception as e:
-                        print(f"[DEBUG] M2M Error: {e}")
-                        already_linked = False
-
+                    already_linked = isFileLinkedToVersion(existing_file, self.project_version)
                     if already_linked:
-                        print("[DEBUG] Skipping: File already linked.")
                         QMessageBox.information(self, "Duplicate", f"'{relative_path}' is already in this version.")
                         continue
 
-                    print("[DEBUG] Prompting user for existing file link...")
                     reply = QMessageBox.question(
                         self, "Link Existing File",
                         f"The path '{relative_path}' already exists.\nLink it to this version?",
@@ -170,66 +152,50 @@ class ProjectVersionPage(QWidget):
                     )
 
                     if reply == QMessageBox.StandardButton.Yes:
-                        print("[DEBUG] Linking existing file...")
                         linkExistingFileToVersion(existing_file, self.project_version)
                         files_added = True
                         continue
                     else:
-                        print("[DEBUG] User declined link.")
                         continue
 
-                # 4. New File Entry
-                print("[DEBUG] Opening Input Dialog for description...")
                 content_input, ok = QInputDialog.getMultiLineText(
                     self, "File Content", f"Description for {os.path.basename(abs_dropped_path)}:"
                 )
 
                 if ok:
-                    print(f"[DEBUG] Sending to API: {relative_path}")
                     success = client_api.addVersionFileToDB_Client(
                         self.user.id,
                         self.project_version.id,
                         relative_path,
                         content_input
                     )
-                    print(f"[DEBUG] API Response Success: {success}")
                     files_added = True
-                else:
-                    print("[DEBUG] User cancelled description dialog.")
 
-        # 5. UI Refresh
         if files_added:
-            print("[DEBUG] Refreshing UI and Audit Log")
             guiSetAuditLog(self, "ProjectVersion")
             self.refresh_file_list()
 
-        print("--- [DEBUG] END handle_file_drop ---\n")
         event.acceptProposedAction()
 
     def refresh_file_list(self):
-        print("[DEBUG] Refreshing file list...")
+        """Fetches the files associated with this specific project version and repopulates the list with custom FileItemWidgets."""
         self.middleList.clear()
-        # Get the data from API
         self.projectVersionData = client_api.getProjectVersionFilesByProjectVersionID_Client(self.project_version.id)
 
-        # Ensure projectVersionData is a valid list before processing
         if isinstance(self.projectVersionData, list) and len(self.projectVersionData) > 0:
             try:
                 file_icons = getItemIcons(self.projectVersionData, "ProjectVersionFile")
                 for f, icon in zip(self.projectVersionData, file_icons):
                     item = QListWidgetItem(self.middleList)
                     item.setSizeHint(QSize(0, 40))
-                    print("began building versionfile fileitemwidget")
                     custom_widget = FileItemWidget(f, icon, self, "ProjectVersionFile", self.project_version)
-                    print("finished building versionfile fileitemwidget")
                     self.middleList.addItem(item)
                     self.middleList.setItemWidget(item, custom_widget)
             except Exception as e:
                 print(f"[DEBUG] UI Render Error: {e}")
-        else:
-            print("[DEBUG] No files found or error in data format")
 
     def handle_file_delete(self, file_obj):
+        """Prompts for removal of a file link from the current version, displaying other project associations for context."""
         associated_versions = client_api.getVersionsByFileID_Client(file_obj.id)
         version_links = []
 
@@ -258,6 +224,7 @@ class ProjectVersionPage(QWidget):
                 QMessageBox.critical(self, "Error", f"Removal failed: {e}")
 
     def handle_audit_toggle(self):
+        """Expands or collapses the audit log panel and ensures media players are stopped when the layout changes."""
         try:
             if hasattr(self, 'audit_container'):
                 guiExpandAuditLog(self, "ProjectVersion")

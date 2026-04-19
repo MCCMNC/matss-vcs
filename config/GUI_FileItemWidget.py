@@ -6,6 +6,11 @@ from GUIFunctions import guiLocalDeviceHasDefaultProgram
 class FileItemWidget(QWidget):
     def __init__(self, file_obj, icon, parent_page, context_type, current_version=None, explicitNoFollow=False,
                  can_edit=False, is_admin=False, can_approve=False):
+        """
+        Initializes the file item row widget, handling complex path normalization and icon assignment.
+        Dynamically assembles the UI layout by layering version labels, folder structures (for Code projects),
+        and context-specific action buttons based on user permissions and the current file state.
+        """
         super().__init__()
         self.file_obj = file_obj
         self.parent_page = parent_page
@@ -36,24 +41,20 @@ class FileItemWidget(QWidget):
             self.ver_label.setFixedWidth(50)
             layout.addWidget(self.ver_label)
 
-        # 2. Universal Path/Icon Logic - This is where the "Map" crash was happening
+        # 2. Universal Path/Icon Logic
         if self.context_type == "ProjectVersion":
             raw_path = get_val(self.file_obj, 'path', "")
         else:
-            # Try title, then path
             raw_path = get_val(self.file_obj, 'title') or get_val(self.file_obj, 'path') or "Unknown"
 
-        # Force raw_path to be a string. If it's a dict, extract the 'path' key from it.
         if isinstance(raw_path, dict):
             raw_path = raw_path.get('path', str(raw_path))
 
-        # Final safety check for the "Double Drive" issue seen in logs
         path_str = str(raw_path)
         if path_str.count(':') > 1:
             path_str = path_str.split(':')[-1][1:]
 
         normalized_path = os.path.normpath(path_str)
-        print("normalized_path : ", normalized_path)
         parts = normalized_path.split(os.sep) if path_str != "Unknown" else ["Unknown"]
 
         # 3. Build the path incrementally (Code projects)
@@ -145,12 +146,14 @@ class FileItemWidget(QWidget):
                 self._add_delete_button(layout, action_type="repository")
             if not self.explicitNoFollow:
                 self._add_follow_button(layout)
-    def _add_pull_button(self,layout):
+
+    def _add_pull_button(self, layout):
+        """Creates and styles the 'Pull' button, connecting it to the parent page's data synchronization logic."""
         btn = QPushButton("Pull")
         btn.setFixedSize(60, 25)
         btn.setStyleSheet("""
                     QPushButton {
-                        background-color: #82ceea color: black;
+                        background-color: #82ceea; color: black;
                         border: 1px solid #388bfd; border-radius: 3px; font-weight: bold;
                     }
                     QPushButton:hover { background-color: #82ceea; }
@@ -158,9 +161,10 @@ class FileItemWidget(QWidget):
         btn.clicked.connect(lambda: self.parent_page.handle_pull(self.file_obj))
         layout.addWidget(btn)
         self.active_buttons.append(btn)
-        return 0
+
     def _add_follow_button(self, layout):
-        if self.explicitNoFollow : return
+        """Instantiates the 'Follow' button for repository tracking, provided the widget hasn't explicitly disabled following."""
+        if self.explicitNoFollow: return
         btn = QPushButton("Follow")
         btn.setFixedSize(60, 25)
         btn.setStyleSheet("""
@@ -175,6 +179,7 @@ class FileItemWidget(QWidget):
         self.active_buttons.append(btn)
 
     def _add_approve_button(self, layout):
+        """Adds a green 'Approve' button used for project versions that require verification before finalization."""
         btn = QPushButton("Approve")
         btn.setFixedSize(75, 25)
         btn.setStyleSheet("""
@@ -189,6 +194,7 @@ class FileItemWidget(QWidget):
         self.active_buttons.append(btn)
 
     def _add_open_button(self, layout, is_version_context=False):
+        """Constructs the 'Open' button, branching the signal connection based on whether we are opening a specific version or a generic project file."""
         btn = QPushButton("Open")
         btn.setFixedSize(60, 25)
         btn.setStyleSheet("""
@@ -208,6 +214,7 @@ class FileItemWidget(QWidget):
         self.active_buttons.append(btn)
 
     def _add_delete_button(self, layout, action_type="file"):
+        """Styles and connects a 'Delete' button. Logic dynamically routes the click event to repository, project, version, or file-level deletion methods on the parent."""
         btn = QPushButton("Delete")
         btn.setFixedSize(60, 25)
         btn.setStyleSheet("""
@@ -218,14 +225,13 @@ class FileItemWidget(QWidget):
             QPushButton:hover { background-color: #b11226; color: white; }
         """)
 
-        # Route to the correct callback based on what we are deleting
         if action_type == "repository":
             btn.clicked.connect(lambda: self.parent_page.handle_delete(self.file_obj))
         elif action_type == "version":
             btn.clicked.connect(lambda: self.parent_page.handle_version_delete(self.file_obj))
         elif action_type == "project":
             btn.clicked.connect(lambda: self.parent_page.handle_project_delete(self.file_obj))
-        else: # default to file
+        else:
             btn.clicked.connect(lambda: self.parent_page.handle_file_delete(self.file_obj))
 
         layout.addWidget(btn)

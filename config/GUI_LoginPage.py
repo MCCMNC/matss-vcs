@@ -3,6 +3,7 @@ from GUIFunctions import *
 
 class LoginPage(QWidget):
     def __init__(self, login_success_callback):
+        """Initializes the login interface, sets up the visual logo, input fields for credentials, and action buttons for authentication."""
         super().__init__()
         self.login_success_callback = login_success_callback
 
@@ -62,7 +63,7 @@ class LoginPage(QWidget):
         main_layout.addWidget(container)
 
     def handleLogin(self):
-        # Existing login logic
+        """Validates the entered credentials against the server and triggers the success callback upon successful authentication."""
         user = guiUserLogin(self.username.text(), self.password.text())
         if user is not None:
             self.username.clear()
@@ -73,6 +74,7 @@ class LoginPage(QWidget):
             self.password.clear()
 
     def handleRegister(self):
+        """Collects new user details via input dialogs and sends a registration request to the server API."""
         # 1. Gather Info via Dialogs
         user, ok1 = QInputDialog.getText(self, "Register", "Enter new Username:")
         if not ok1 or not user: return

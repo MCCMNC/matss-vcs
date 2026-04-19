@@ -20,6 +20,7 @@ from GUI_ProgramTypePage import ProgramTypePage
 
 class MainWindow(QMainWindow):
     def __init__(self):
+        """Initializes the main window, sets frameless flags, styles, and initial login state."""
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window)
 
@@ -72,7 +73,7 @@ class MainWindow(QMainWindow):
         self.dashboard_page = None
         self.repo_page = None
         self.project_page = None
-        self.version_page = None  # Tracking for version page
+        self.version_page = None
 
         self.Stack.addWidget(self.login_page)
         self.Stack.setCurrentWidget(self.login_page)
@@ -83,12 +84,15 @@ class MainWindow(QMainWindow):
         self.titleBar.mouseMoveEvent = self.doMove
 
     def handle_title_close(self):
+        """Determines whether to simply close the application or perform a logout cleanup before exiting."""
         if self.Stack.currentWidget() == self.login_page:
             self.close()
         else:
             self.logout()
             self.close()
-    def show_programType(self,user):
+
+    def show_programType(self, user):
+        """Resizes the window and displays the Program Type selection page after a successful login."""
         self.hide()
         self.setFixedSize(720, 640)
         screen_geo = self.screen().availableGeometry().center()
@@ -96,11 +100,13 @@ class MainWindow(QMainWindow):
         frame_geo.moveCenter(screen_geo)
         self.move(frame_geo.topLeft())
 
-        self.programtype_page = ProgramTypePage(user,self.show_dashboard)
+        self.programtype_page = ProgramTypePage(user, self.show_dashboard)
         self.Stack.addWidget(self.programtype_page)
         self.Stack.setCurrentWidget(self.programtype_page)
         self.show()
-    def show_dashboard(self, user,programType = "Studio"):
+
+    def show_dashboard(self, user, programType="Studio"):
+        """Transitions to the main Dashboard, resizing the window to the primary workspace dimensions."""
         self.hide()
         self.current_user = user
         self.setFixedSize(1440, 810)
@@ -110,14 +116,15 @@ class MainWindow(QMainWindow):
         self.move(frame_geo.topLeft())
 
         if not self.dashboard_page:
-            print("MainWindow creating "+programType +" dashboard page")
-            self.dashboard_page = DashboardPage(user, self.show_repos, self.logout,programType)
+            print("MainWindow creating " + programType + " dashboard page")
+            self.dashboard_page = DashboardPage(user, self.show_repos, self.logout, programType)
             self.Stack.addWidget(self.dashboard_page)
 
         self.Stack.setCurrentWidget(self.dashboard_page)
         self.show()
 
-    def show_repos(self, repo_obj,programType="Studio"):
+    def show_repos(self, repo_obj, programType="Studio"):
+        """Initializes and displays the Repository page for a selected repo, ensuring previous repo instances are cleaned up."""
         pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
 
         if self.repo_page:
@@ -130,20 +137,20 @@ class MainWindow(QMainWindow):
             self.back_to_dashboard,
             self.logout,
             self.show_project,
-            pfp_pixmap = pixmap,
-            programType = programType
+            pfp_pixmap=pixmap,
+            programType=programType
         )
 
         self.Stack.addWidget(self.repo_page)
         self.Stack.setCurrentWidget(self.repo_page)
 
-    def show_project(self, project_data,programType="Studio"):
+    def show_project(self, project_data, programType="Studio"):
+        """Navigates to a specific Project page and provides a callback to drill down into versions."""
         pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
         if self.project_page:
             self.Stack.removeWidget(self.project_page)
             self.project_page.deleteLater()
 
-        # Added self.show_version as the version_callback
         self.project_page = ProjectPage(
             self.current_user,
             project_data,
@@ -156,7 +163,7 @@ class MainWindow(QMainWindow):
         self.Stack.setCurrentWidget(self.project_page)
 
     def show_version(self, version_data):
-        """Navigates to the ProjectVersionPage when a version is clicked in ProjectPage"""
+        """Displays the details of a specific Project Version, cleaning up any existing version page first."""
         pixmap = self.dashboard_page.get_pfp_pixmap() if self.dashboard_page else None
 
         if self.version_page:
@@ -174,7 +181,7 @@ class MainWindow(QMainWindow):
         self.Stack.setCurrentWidget(self.version_page)
 
     def back_to_project(self):
-        """Returns from VersionPage to ProjectPage"""
+        """Navigates backward from the Version view to the Project view and destroys the Version page."""
         if self.project_page:
             self.Stack.setCurrentWidget(self.project_page)
 
@@ -184,6 +191,7 @@ class MainWindow(QMainWindow):
             self.version_page = None
 
     def back_to_repo(self):
+        """Returns to the Repository view and cleans up the Project page resources."""
         if self.repo_page:
             self.Stack.setCurrentWidget(self.repo_page)
 
@@ -193,6 +201,7 @@ class MainWindow(QMainWindow):
             self.project_page = None
 
     def back_to_dashboard(self):
+        """Returns to the main Dashboard view and cleans up the Repository page resources."""
         self.Stack.setCurrentWidget(self.dashboard_page)
         if self.repo_page:
             self.Stack.removeWidget(self.repo_page)
@@ -200,18 +209,14 @@ class MainWindow(QMainWindow):
             self.repo_page = None
 
     def logout(self):
+        """Notifies the server of logout, clears the local user session, destroys all active pages, and returns to the login screen."""
         self.hide()
 
         if self.current_user:
-            # 1. Notify the Server
-            # Assuming current_user is a dict from our previous login logic
             user_id = self.current_user.get('id')
             client_api.logout_request(user_id)
-
-            # 2. Clear local user session
             self.current_user = None
 
-        # 3. Clean up all pages on logout
         for page_attr in ['dashboard_page', 'repo_page', 'project_page', 'version_page']:
             page = getattr(self, page_attr, None)
             if page:
@@ -219,7 +224,6 @@ class MainWindow(QMainWindow):
                 page.deleteLater()
                 setattr(self, page_attr, None)
 
-        # 4. Reset Window and return to Login
         self.setFixedSize(480, 640)
         screen = self.screen().availableGeometry()
         x = (screen.width() - self.width()) // 2
@@ -230,10 +234,12 @@ class MainWindow(QMainWindow):
         self.show()
 
     def startMove(self, event):
+        """Captures the initial mouse position when clicking the custom title bar to facilitate window dragging."""
         if event.button() == Qt.MouseButton.LeftButton:
             self.oldPos = event.globalPosition().toPoint()
 
     def doMove(self, event):
+        """Calculates the mouse movement delta and updates the window position for a custom frameless drag effect."""
         if event.buttons() == Qt.MouseButton.LeftButton:
             delta = QPoint(event.globalPosition().toPoint() - self.oldPos)
             self.move(self.x() + delta.x(), self.y() + delta.y())
