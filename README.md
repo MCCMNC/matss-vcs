@@ -4,6 +4,6 @@ python config/manage.py runserver
 
 run MATVCSgui.py
 
-Usernames : Admin,Reviewer,Author,Guest
+Username : martin
 
-Password for all : 123
+Password : 123
