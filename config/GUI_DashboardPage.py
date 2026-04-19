@@ -147,13 +147,19 @@ class DashboardPage(QWidget):
                     target_file_path = os.path.normpath(os.path.join(final_local_path, project.path))
 
                     os.makedirs(os.path.dirname(target_file_path), exist_ok=True)
-                    if server_file_path.startswith('config'):
-                        server_file_path = server_file_path[7:]
 
                     if os.path.exists(server_file_path):
                         shutil.copy2(server_file_path, target_file_path)
                     else:
-                        print(f"Warning: Physical file not found for {project.title}: {server_file_path}")
+                        
+                        if server_file_path.startswith('config'):
+                            server_file_path = server_file_path[7:]
+
+                        if os.path.exists(server_file_path):
+                            shutil.copy2(server_file_path, target_file_path)
+
+                        else: print(f"Warning: Physical file not found for {project.title}: {server_file_path}")
+                        
                 else:
                     print(f"Skipping {project.title}: No approved versions found.")
 
