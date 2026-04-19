@@ -81,7 +81,7 @@ class ProjectPage(QWidget):
         orphaned_files_paths = []
         for f in associated_files:
             # Use your existing function to check usage
-            usage_list = getVersionsByFileID(f.id)
+            usage_list = client_api.getVersionsByFileID_Client(f.id)
             if len(usage_list) <= 1:
                 orphaned_files_paths.append(f.path)
 
@@ -145,65 +145,83 @@ class ProjectPage(QWidget):
         urls = event.mimeData().urls()
         if not urls: return
 
-        # Get Repo Root for relative pathing
-        repo_path_raw = self.project_data.repository.path
+        # SAFELY get Repo Root for relative pathing
+        # Handling both dict and object types for project_data
+        if isinstance(self.project_data, dict):
+            repo_path_raw = self.project_data.get('repository', {}).get('path', "")
+            project_id = self.project_data.get('id')
+        else:
+            repo_path_raw = self.project_data.repository.path
+            project_id = self.project_data.id
+
+        if not repo_path_raw:
+            QMessageBox.warning(self, "Error", "Could not determine repository path.")
+            return
+
         repo_root = os.path.normpath(os.path.abspath(repo_path_raw))
+        user_id = self.user.get('id') if isinstance(self.user, dict) else self.user.id
 
         for url in urls:
             abs_path = os.path.normpath(url.toLocalFile())
             if os.path.isfile(abs_path):
-                currentUserRoleInRepo = client_api.getUserRole_Client(self.user.id,
-                                                                      self.currentRepository.id)
-                if self.programType=="Studio":
-                    # Calculate relative path past the repository
+                currentUserRoleInRepo = client_api.getUserRole_Client(user_id, self.currentRepository.id)
+
+                if self.programType == "Studio":
+                    print("started Studio ProjectPage dropEvent")
                     relative_path = os.path.relpath(abs_path, repo_root)
+
                     if relative_path.startswith(".."):
                         QMessageBox.warning(self, "Invalid Location", f"File must be inside repository:\n{repo_root}")
                         continue
 
-                    # Prompt for version message
                     message, ok = QInputDialog.getMultiLineText(self, "New Version", "Enter version message:")
                     if ok and message:
                         status = "Draft"
-                        # Admin Auto-Approve Check
-                        if currentUserRoleInRepo == "Admin": #TODO : FIX THIS TO POINT TO REPOSITORYMEMBERSHIP
+                        if currentUserRoleInRepo == "Admin":
                             reply = QMessageBox.question(self, "Admin", "Auto-approve this version?",
                                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                             if reply == QMessageBox.StandardButton.Yes:
                                 status = "Approved"
 
-                        try:
-                            # Create version (Inherits M2M files from previous version automatically)
-                            new_ver = addNextProjectVersionToDB(self.project_data, self.user, message, relative_path)
-                            new_ver.status = status
-                            new_ver.save()
+                        # FIX: Pass project_id and user_id (Integers), NOT the full objects
+                        result = client_api.addNextProjectVersion_Client(
+                            project_id,
+                            user_id,
+                            message,
+                            relative_path,
+                            status
+                        )
+
+                        if result and result.get('success'):
                             self.refresh_version_list()
                             guiSetAuditLog(self, "Project")
-                        except Exception as e:
-                            QMessageBox.warning(self, "DB Error", f"Failed: {e}")
+                        else:
+                            error_msg = result.get('error', 'Unknown error') if result else "No response from server"
+                            QMessageBox.warning(self, "DB Error", f"Failed: {error_msg}")
+
                 elif self.programType == "Code":
-                    print(abs_path)
-                    if checkAbsPathToCodeFile(self.project_data,abs_path):
+                    # Ensure the 'Code' logic also uses IDs if you serverize addNextCodeFileVersionToDB later
+                    if checkAbsPathToCodeFile(self.project_data, abs_path):
                         message, ok = QInputDialog.getMultiLineText(self, "New Version", "Enter version message:")
                         if ok and message:
-                            print("matching names")
                             status = "Pending"
                             if currentUserRoleInRepo == "Admin":
                                 reply = QMessageBox.question(self, "Admin", "Auto-approve this version?",
                                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
                                 if reply == QMessageBox.StandardButton.Yes:
                                     status = "Approved"
-                            new_codeFileVer = addNextCodeFileVersionToDB(self.project_data, self.user, message,abs_path)
+
+                            # Assuming this logic is still local for now, but watch the status.save()
+                            new_codeFileVer = addNextCodeFileVersionToDB(self.project_data, self.user, message,
+                                                                         abs_path)
                             new_codeFileVer.status = status
                             new_codeFileVer.save()
                             self.refresh_version_list()
                             guiSetAuditLog(self, "Project")
-                    else :
+                    else:
                         print("mismatched names")
-                    #check if the file's name is the exact same as project_data.title
 
         event.acceptProposedAction()
-
     # -------------------- UI Helpers --------------------
 
     def showEvent(self, event):

@@ -337,20 +337,33 @@ def guiExpandAuditLog(inputWidget, inputInstruction):
     inputWidget.is_expanded = expand
     inputWidget._is_toggling = False
 
+
 def getItemIcons(inputDBElements, inputItemsType):
     returnedIcons = []
     icon_provider = QFileIconProvider()
-    
+    print("started getting item icons : ",inputItemsType)
     for item in inputDBElements:
-        rel_path = client_api.getElementRelativePath_Client(item.id, inputItemsType)
+        # 1. Get the response from the API
+        result = client_api.getElementRelativePath_Client(item.id, inputItemsType)
+
+        # 2. Extract the string if it's a dictionary/Map
+        if isinstance(result, dict):
+            rel_path = result.get('path', '')
+        else:
+            rel_path = str(result)
+
+        # 3. Clean up the path
         if rel_path.startswith("config"):
             rel_path = rel_path[7:]
+
         rel_path = PureWindowsPath(rel_path).as_posix()
-        print(rel_path)
+        print(f"[DEBUG] Icon Path: {rel_path}")
+
+        # 4. Use QFileInfo safely
         file_info = QFileInfo(rel_path)
         native_icon = icon_provider.icon(file_info)
         returnedIcons.append(native_icon)
-        
+    print("finished getting item icons : ",inputItemsType)
     return returnedIcons
 
 def formatWidgetSlashes(inputWidget):

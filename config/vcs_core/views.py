@@ -1,4 +1,4 @@
-from datetime import timezone
+from django.utils import timezone
 
 from django.shortcuts import get_object_or_404, render
 from rest_framework.response import Response
@@ -216,7 +216,7 @@ def getVersionsByFileID_View(request, inputVersionFileID):
 
 @api_view(['GET'])
 def getElementRelativePath_View(request):
-    #get parameters from /api/utility/get-path/?id=5&type=Project
+    # get parameters from /api/utility/get-path/?id=5&type=Project
     element_id = request.query_params.get('id')
     element_type = request.query_params.get('type')
     context_id = request.query_params.get('context_id')
@@ -227,16 +227,16 @@ def getElementRelativePath_View(request):
     try:
         if element_type == "Repository":
             obj = get_object_or_404(Repository, pk=element_id)
-            
+
         elif element_type == "Project":
             obj = get_object_or_404(Project, pk=element_id)
-            
+
         elif element_type == "ProjectVersion":
             obj = get_object_or_404(ProjectVersion, pk=element_id)
-            
+
         elif element_type == "ProjectVersionFile":
             obj = get_object_or_404(VersionFile, pk=element_id)
-            
+
         else:
             return Response({"error": "Invalid element type"}, status=400)
 
@@ -245,7 +245,7 @@ def getElementRelativePath_View(request):
             context_obj = ProjectVersion.objects.filter(pk=context_id).first()
 
         path_string = DBFunctions.getElementRelativePath(obj, element_type, inputContext=context_obj)
-        
+
         return Response({"relative_path": path_string})
 
     except Exception as e:
@@ -591,27 +591,51 @@ def updateMemberRole_View(request, m_id):
         return Response({'error': 'Membership not found'}, status=404)
 
 
+import hashlib
+
+
+def hash_password(password):
+    salt = os.urandom(16).hex()  # Creates a 32-character hex string
+    hash_obj = hashlib.sha256((password + salt).encode('utf-8'))
+    return f"{salt}:{hash_obj.hexdigest()}"
+
+
+def verify_password(stored_val, provided_password):
+    try:
+        # If the DB doesn't have a colon, it's an old plain-text password
+        if ":" not in stored_val:
+            return False
+
+        salt, original_hash = stored_val.split(':')
+        # Hash the attempt using the salt we found in the DB
+        new_hash = hashlib.sha256((provided_password + salt).encode('utf-8')).hexdigest()
+
+        return new_hash == original_hash
+    except Exception:
+        return False
 @api_view(['POST'])
 def login_view(request):
-    # 1. Get data from the client request
+    print("got to login view")
     username = request.data.get('username')
-    password = request.data.get('password')
+    # Use .strip() to remove any accidental whitespace from the GUI input
+    password = request.data.get('password', '').strip()
 
-    # 2. Find the user
+    if not username or not password:
+        return Response({'error': 'Missing credentials'}, status=400)
+
     potential_user = User.objects.filter(username=username).first()
 
-    # 3. Apply your specific logic
-    if potential_user is None or potential_user.password_hash != password:
-        return Response({'error': 'Invalid username or password'}, status=401)
+    # CHECK: Pass the DB string AND the user's input
+    if potential_user is None or not verify_password(potential_user.password_hash, password):
+        return Response({'error': 'Invalid credentials'}, status=401)
 
-    # 4. Success - Return user data to the GUI
-    # Note: userLogIn(potential_user) should happen here on the server
+    # Success
     DBFunctions.userLogIn(potential_user)
 
     return Response({
         'id': potential_user.id,
         'username': potential_user.username,
-        'role': potential_user.role  # Useful for your GUI logic
+        'role': potential_user.role
     }, status=200)
 
 
@@ -661,3 +685,100 @@ def logout_view(request):
         return Response({'message': 'Logged out successfully'}, status=200)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=404)
+from django.views.decorators.csrf import csrf_exempt
+@csrf_exempt
+@api_view(['POST'])
+def register_user_view(request):
+    username = request.data.get('username')
+    email = request.data.get('email')
+    password = request.data.get('password')
+
+    if not username or not password:
+        return Response({'error': 'Username and password are required'}, status=400)
+
+    if User.objects.filter(username=username).exists():
+        return Response({'error': 'Username already exists'}, status=400)
+
+    try:
+        # --- THE FIX: HASH THE PASSWORD HERE ---
+        hashed_pw = hash_password(password)
+
+        new_user = User.objects.create(
+            username=username,
+            email=email if email else "no email",
+            password_hash=hashed_pw, # Store the salted hash
+            role="UNUSED",
+            loginStatus=0,
+            created_at=timezone.now()
+        )
+        return Response({'message': 'Registration successful'}, status=201)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+import logging
+logger = logging.getLogger(__name__)
+
+@api_view(['POST'])
+def create_project_version_view(request):
+    try:
+        # Debug print to see what the server is actually receiving
+        print(f"[DEBUG] Received Data: {request.data}")
+
+        project_id = request.data.get('project_id')
+        user_id = request.data.get('user_id')
+        message = request.data.get('message', '')
+        path = request.data.get('path', '')
+        status = request.data.get('status', 'Pending')
+
+        if not project_id or not user_id:
+            return Response({"success": False, "error": "project_id and user_id are required"}, status=400)
+
+        # Fetch actual objects
+        project = Project.objects.get(pk=project_id)
+        user = User.objects.get(pk=user_id)
+
+        # Execute logic
+        new_version = DBFunctions.addNextProjectVersionToDB(project, user, message, path, status)
+
+        return Response({
+            "success": True,
+            "version_id": new_version.id,
+            "version_number": new_version.version_number
+        }, status=201)
+
+    except Project.DoesNotExist:
+        return Response({"success": False, "error": "Project not found"}, status=404)
+    except User.DoesNotExist:
+        return Response({"success": False, "error": "User not found"}, status=404)
+    except Exception as e:
+        # This will print the actual error to your Django terminal
+        import traceback
+        traceback.print_exc()
+        return Response({"success": False, "error": str(e)}, status=500)
+@api_view(['GET'])
+def get_versions_by_file_view(request):
+    """
+    Returns all ProjectVersions associated with a specific file ID.
+    URL Pattern: /api/utility/file-versions/?file_id=123
+    """
+    try:
+        file_id = request.query_params.get('file_id')
+        if not file_id:
+            return Response({"success": False, "error": "file_id is required"}, status=400)
+
+        # We filter versions that contain this file.
+        # Using 'files__id' or 'projectversionfile__id' depending on your schema.
+        # Based on your last error, 'versions' was the M2M, so we query ProjectVersion directly:
+        queryset = ProjectVersion.objects.filter(
+            files__id=file_id
+        ).values('id', 'version_number', 'project__title', 'message', 'created_at')
+
+        return Response({
+            "success": True,
+            "versions": list(queryset)
+        }, status=200)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return Response({"success": False, "error": str(e)}, status=500)

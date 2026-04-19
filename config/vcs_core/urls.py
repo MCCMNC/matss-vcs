@@ -46,4 +46,7 @@ urlpatterns = [
     path('api/login/', views.login_view),
     path('api/logout/',views.logout_view),
     path('repos/add-member/',views.addRepoMember_View),
+    path('api/register/',views.register_user_view),
+    path('projects/add-version/',views.create_project_version_view),
+    path('/utility/file-versions/<int:file_id>',views.get_versions_by_file_view)
 ]

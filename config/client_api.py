@@ -121,8 +121,8 @@ def getElementRelativePath_Client(element_id, element_type, context_id=None):
         params['context_id'] = context_id
 
     result = _api_call('GET', '/utility/get-path/', data=params)
-    
-    # Since the view returns {"relative_path": "..."}, 
+
+    # Since the view returns {"relative_path": "..."},
     # and our helper returns a Map, we can access it with .relative_path
     return result.relative_path if result else ""
 
@@ -156,9 +156,6 @@ def addVersionFileToDB_Client(user_id, version_id, file_path, content):
 
 def getProjectVersionFilesByProjectVersionID_Client(inputVersionID):
     return _api_call('GET', f'/versions/{inputVersionID}/files/')
-
-def getVersionsByFileID_Client(inputVersionFileID):
-    return _api_call('GET', f'/files/{inputVersionFileID}/versions-summary/')
 
 #path('files/remove-from-version/', views.removeVersionFileFromDB_View),
 def removeVersionFileFromDB_Client(user_id, file_id, version_id):
@@ -291,3 +288,48 @@ def logout_request(user_id):
     """
     payload = {'user_id': user_id}
     return _api_call('POST', '/api/logout/', data=payload)
+
+def register_request(username, email, password):
+    """
+    Sends a registration request to the server.
+    """
+    payload = {
+        'username': username,
+        'email': email,
+        'password': password
+    }
+    return _api_call('POST', '/api/register/', data=payload)
+
+
+def addNextProjectVersion_Client(project_id, user_id, message, path, status):
+    try:
+        # Ensure we are sending integers, not objects or keys
+        p_id = int(project_id)
+        u_id = int(user_id)
+    except (ValueError, TypeError):
+        print(f"[ERROR] API Call failed: project_id({project_id}) or user_id({user_id}) is not a number!")
+        return {"success": False, "error": "Invalid ID format sent to server"}
+
+    payload = {
+        "project_id": p_id,
+        "user_id": u_id,
+        "message": str(message),
+        "path": str(path),
+        "status": str(status)
+    }
+
+    return _api_call('POST', '/projects/add-version/', data=payload)
+
+
+def getVersionsByFileID_Client(file_id):
+    """
+    Calls the server to get all versions associated with a file.
+    """
+    endpoint = f'/utility/file-versions/{file_id}'
+    response = _api_call('GET', endpoint)
+
+    if isinstance(response, dict) and response.get('success'):
+        return response.get('versions', [])
+
+    print(f"[ERROR] Failed to fetch versions for file {file_id}: {response}")
+    return []

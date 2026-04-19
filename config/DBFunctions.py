@@ -110,40 +110,37 @@ def logCreateProjectVersion(inputUser, inputProject, inputVersion):
     )
 
 
-def addNextProjectVersionToDB(inputProject, inputAuthor, inputMessage, inputPath):
-    try:
-        with transaction.atomic():
-            latest = (
-                ProjectVersion.objects
-                .filter(project_id=inputProject.pk)
-                .order_by("-version_number")
-                .first()
-            )
+def addNextProjectVersionToDB(project_obj, user_obj, message, path, status):
+    # 1. Get the last version
+    last_version = ProjectVersion.objects.filter(project=project_obj).order_by('version_number').last()
+    new_v_num = (last_version.version_number + 1) if last_version else 1
 
-            nextVersion = 1 if not latest else latest.version_number + 1
-            currentVersion, created = ProjectVersion.objects.get_or_create(
-                project=inputProject,
-                version_number=nextVersion,
-                defaults={
-                    "path": inputPath,
-                    "author": inputAuthor,
-                    "message": inputMessage
-                }
-            )
-            if latest:
-                for attr in ['files', 'version_files', 'projectversionfile_set']:
-                    if hasattr(latest, attr):
-                        old_files = getattr(latest, attr).all()
-                        getattr(currentVersion, attr).add(*old_files)
-                        break
-                else:
-                    print("Warning: No Many-to-Many relationship found on ProjectVersion.")
+    # 2. Create the new version
+    new_version = ProjectVersion.objects.create(
+        project=project_obj,
+        author=user_obj,
+        version_number=new_v_num,
+        message=message,
+        path=path,
+        status=status
+    )
 
-            logCreateProjectVersion(inputAuthor, inputProject, currentVersion)
-            return currentVersion
-    except Exception as e:
-        print(f"Error during project version creation: {e}")
-        return None
+    # 3. Inherit files
+    if last_version:
+        # The log says 'versions' is the valid keyword.
+        # This implies a Many-to-Many relationship where the field
+        # is likely on the File model pointing back to versions.
+
+        # We find files associated with the last version
+        # Note: Replace 'VersionFile' with your actual model name if different
+        old_files = VersionFile.objects.filter(versions=last_version)
+
+        for f in old_files:
+            # Since it's a version control system, we link the existing file
+            # record to the new version record (Many-to-Many)
+            f.versions.add(new_version)
+
+    return new_version
 
 def logCreateVersionFile(inputUser, inputProjectVersionFile, inputProjectVersion):
     project = inputProjectVersion.project

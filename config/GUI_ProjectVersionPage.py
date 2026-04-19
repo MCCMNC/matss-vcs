@@ -1,29 +1,8 @@
-import os
-import wave
-import numpy as np
-import random
-from PyQt6.QtCore import Qt, QFileInfo, QSize, QUrl, QTimer
-from PyQt6.QtWidgets import (
-    QWidget, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QListWidget, QListWidgetItem, QFrame,
-    QMessageBox, QFileIconProvider, QSlider, QInputDialog, QDialog
-)
-from PyQt6.QtGui import QFont, QPixmap, QIcon, QPainter, QColor, QBrush
+from PyQt6.QtCore import QSize
 from GUIFunctions import *
 from DBFunctions import *
 from GUI_FileItemWidget import FileItemWidget
-from GUI_AudioSupport import AudioPlayerWidget, StaticWaveformWidget
-from GUIHelperWindows import ManageUsersDialog, AddUserDialog
-
-
-def getItemIcons(inputDBElements, inputItemsType):
-    returnedIcons = []
-    icon_provider = QFileIconProvider()
-    for item in inputDBElements:
-        file_info = QFileInfo(getElementRelativePath(item, inputItemsType))
-        native_icon = icon_provider.icon(file_info)
-        returnedIcons.append(native_icon)
-    return returnedIcons
+from GUIHelperWindows import ManageUsersDialog
 
 
 class ProjectVersionPage(QWidget):
@@ -41,7 +20,7 @@ class ProjectVersionPage(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setStyleSheet(f"ProjectVersionPage {{ background-color: #0d0e0f; color: #b9c2c9; }} {SCROLLBAR_STYLE}")
-
+        self.handleAddUSer = "TO BE OVERWRITTEN"
         gui_buildDesign(self, "ProjectVersion")
         gui_buildBottomRow(self,"ProjectVersion")
 
@@ -58,46 +37,6 @@ class ProjectVersionPage(QWidget):
         """Displays the list of all users associated with this repository."""
         dialog = ManageUsersDialog(self.currentRepository, self)
         dialog.exec()
-    def handleAddUser(self): #TODO : GET RID OF DB LOGIC HERE
-        dialog = AddUserDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            username, role = dialog.get_data()
-
-            if not username:
-                QMessageBox.warning(self, "Input Error", "Please enter a username.")
-                return
-
-            try:
-                # 1. Check if user exists
-                from vcs_core.models import User, Repository, RepositoryMembership
-
-                try:
-                    target_user = User.objects.get(username=username)
-                except User.DoesNotExist:
-                    QMessageBox.critical(self, "Error", f"User '{username}' not found in database.")
-                    return
-                repo_obj = self.currentRepository
-
-                # 3. Create or Update membership
-                membership, created = RepositoryMembership.objects.update_or_create(
-                    user=target_user,
-                    repository=repo_obj,
-                    defaults={'repo_role': role}
-                )
-
-                # 4. Log the action
-                AuditLog.objects.create(
-                    user=self.user,  # The person performing the addition
-                    action="ADD_MEMBER",
-                    repository=repo_obj,
-                    details=f"Added {username} as {role} to {self.currentRepository.title}"
-                )
-
-                status_msg = "Added" if created else "Updated"
-                QMessageBox.information(self, "Success", f"Successfully {status_msg} {username} as {role}.")
-
-            except Exception as e:
-                QMessageBox.critical(self, "Database Error", f"Could not add user: {e}")
     def handle_back_click(self):
         if hasattr(self, 'audio_player'):
             self.audio_player.player.stop()
@@ -141,94 +80,141 @@ class ProjectVersionPage(QWidget):
         return super().eventFilter(source, event)
 
     def handle_file_drop(self, event):
+        print("\n--- [DEBUG] START handle_file_drop ---")
         project = getattr(self.project_version, 'project', None)
-    
         target_repo = None
         if project:
             target_repo = getattr(project, 'repository', None)
 
+        # 1. Auth Check
         auth = False
         if target_repo:
-            auth = RepositoryMembership.objects.filter(
-                user=self.user,
-                repository=target_repo,
-                repo_role__in=["Admin", "Author"]
-            ).exists()
+            currentUserRoleInRepo = client_api.getUserRole_Client(self.user.id, target_repo.id)
+            print(f"[DEBUG] User Role: {currentUserRoleInRepo}")
+            if currentUserRoleInRepo in ["Admin", "Author"]:
+                auth = True
 
         if not auth:
+            print("[DEBUG] FAILED: User not authorized for this repo")
             QMessageBox.warning(self, "Error", "You cannot upload to this repository.")
             return
-        
+
         urls = event.mimeData().urls()
+        print(f"[DEBUG] Found {len(urls)} URLs in drop event")
         files_added = False
 
+        # 2. Resolve Repo Root
         try:
-            self.project_version.refresh_from_db()
-
             repo_path_raw = self.project_version.project.repository.path
             repo_root = os.path.normpath(os.path.abspath(repo_path_raw))
+            print(f"[DEBUG] Repo Root resolved to: {repo_root}")
         except Exception as e:
+            print(f"[DEBUG] FAILED: Could not resolve repo root: {e}")
             return
 
         for url in urls:
             abs_dropped_path = os.path.normpath(url.toLocalFile())
+            print(f"\n[DEBUG] Processing file: {abs_dropped_path}")
 
             if os.path.isfile(abs_dropped_path):
+                # --- PATH LOGIC ---
                 try:
                     relative_path = os.path.relpath(abs_dropped_path, repo_root)
+                    print(f"[DEBUG] Calculated relpath: {relative_path}")
                     if relative_path.startswith(".."):
-                        continue
-                except ValueError:
-                    continue
+                        print("[DEBUG] Path is outside repo; falling back to basename")
+                        relative_path = os.path.basename(abs_dropped_path)
+                except ValueError as e:
+                    print(f"[DEBUG] Drive mismatch detected ({e}); falling back to basename")
+                    relative_path = os.path.basename(abs_dropped_path)
+
+                relative_path = relative_path.replace('\\', '/')
+                print(f"[DEBUG] Final Relative Path for DB: {relative_path}")
+
+                # 3. Duplicate / Link Check
+                print(f"[DEBUG] Checking DB for existing path: {relative_path}")
                 existing_file = getVersionFileByPath(relative_path)
 
                 if existing_file:
+                    print(f"[DEBUG] Match found in DB (ID: {existing_file.id})")
                     try:
                         already_linked = isFileLinkedToVersion(existing_file, self.project_version)
+                        print(f"[DEBUG] Already linked to this version? {already_linked}")
                     except Exception as e:
-                        print(f"M2M Evaluation Error: {e}")
+                        print(f"[DEBUG] M2M Error: {e}")
                         already_linked = False
 
                     if already_linked:
-                        QMessageBox.information(self, "Duplicate", f"File is already in this version.")
+                        print("[DEBUG] Skipping: File already linked.")
+                        QMessageBox.information(self, "Duplicate", f"'{relative_path}' is already in this version.")
                         continue
 
+                    print("[DEBUG] Prompting user for existing file link...")
                     reply = QMessageBox.question(
                         self, "Link Existing File",
-                        f"This file already exists in the database.\nWould you like to link it to this version?",
+                        f"The path '{relative_path}' already exists.\nLink it to this version?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                     )
 
                     if reply == QMessageBox.StandardButton.Yes:
+                        print("[DEBUG] Linking existing file...")
                         linkExistingFileToVersion(existing_file, self.project_version)
                         files_added = True
                         continue
+                    else:
+                        print("[DEBUG] User declined link.")
+                        continue
+
+                # 4. New File Entry
+                print("[DEBUG] Opening Input Dialog for description...")
                 content_input, ok = QInputDialog.getMultiLineText(
                     self, "File Content", f"Description for {os.path.basename(abs_dropped_path)}:"
                 )
+
                 if ok:
-                    client_api.addVersionFileToDB_Client(self.user.id, self.project_version,relative_path,content_input)
+                    print(f"[DEBUG] Sending to API: {relative_path}")
+                    success = client_api.addVersionFileToDB_Client(
+                        self.user.id,
+                        self.project_version.id,
+                        relative_path,
+                        content_input
+                    )
+                    print(f"[DEBUG] API Response Success: {success}")
                     files_added = True
+                else:
+                    print("[DEBUG] User cancelled description dialog.")
 
+        # 5. UI Refresh
         if files_added:
-            self.refresh_file_list()
+            print("[DEBUG] Refreshing UI and Audit Log")
             guiSetAuditLog(self, "ProjectVersion")
+            self.refresh_file_list()
 
+        print("--- [DEBUG] END handle_file_drop ---\n")
         event.acceptProposedAction()
 
     def refresh_file_list(self):
+        print("[DEBUG] Refreshing file list...")
         self.middleList.clear()
+        # Get the data from API
         self.projectVersionData = client_api.getProjectVersionFilesByProjectVersionID_Client(self.project_version.id)
 
-        if self.projectVersionData:
-            file_icons = getItemIcons(self.projectVersionData, "ProjectVersionFile")
-
-            for f, icon in zip(self.projectVersionData, file_icons):
-                item = QListWidgetItem(self.middleList)
-                item.setSizeHint(QSize(0, 40))
-                custom_widget = FileItemWidget(f, icon, self, "ProjectVersionFile", self.project_version)
-                self.middleList.addItem(item)
-                self.middleList.setItemWidget(item, custom_widget)
+        # Ensure projectVersionData is a valid list before processing
+        if isinstance(self.projectVersionData, list) and len(self.projectVersionData) > 0:
+            try:
+                file_icons = getItemIcons(self.projectVersionData, "ProjectVersionFile")
+                for f, icon in zip(self.projectVersionData, file_icons):
+                    item = QListWidgetItem(self.middleList)
+                    item.setSizeHint(QSize(0, 40))
+                    print("began building versionfile fileitemwidget")
+                    custom_widget = FileItemWidget(f, icon, self, "ProjectVersionFile", self.project_version)
+                    print("finished building versionfile fileitemwidget")
+                    self.middleList.addItem(item)
+                    self.middleList.setItemWidget(item, custom_widget)
+            except Exception as e:
+                print(f"[DEBUG] UI Render Error: {e}")
+        else:
+            print("[DEBUG] No files found or error in data format")
 
     def handle_file_delete(self, file_obj):
         associated_versions = client_api.getVersionsByFileID_Client(file_obj.id)

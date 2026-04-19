@@ -9,7 +9,7 @@ class DashboardPage(QWidget):
     def __init__(self, loginUser, on_repo_selected, on_logout, programType):
         super().__init__()
         print("init DashboardPage - "+programType)
-        self.program_type = programType
+        self.programType = programType
         self.user = loginUser
         self.on_repo_selected = on_repo_selected
         self.on_logout = on_logout
@@ -51,7 +51,7 @@ class DashboardPage(QWidget):
 
                 if confirm == QMessageBox.StandardButton.Yes:
                     # REPLACED: Direct function call replaced with API helper
-                    if client_api.api_create_repository(self.user,repo_name, folder_path,self.program_type):
+                    if client_api.api_create_repository(self.user,repo_name, folder_path,self.programType):
                         self.refresh_repo_list()
                         guiSetAuditLog(self, "Dashboard")
                     else:
@@ -71,8 +71,8 @@ class DashboardPage(QWidget):
 
     def refresh_repo_list(self):
         self.middleList.clear()
-        print("program type ",self.program_type)
-        repos = client_api.getUserRepos_Client(self.user.id, self.program_type)
+        print("program type ",self.programType)
+        repos = client_api.getUserRepos_Client(self.user.id, self.programType)
         print(repos)
         repo_icons = getItemIcons(repos, "Repository")
         for repo, icon in zip(repos, repo_icons):
@@ -100,7 +100,7 @@ class DashboardPage(QWidget):
         )
 
         if confirm == QMessageBox.StandardButton.Yes:
-            success = client_api.removeRepository_Client(self.user.id, repo_map.id,self.program_type)
+            success = client_api.removeRepository_Client(self.user.id, repo_map.id,self.programType)
             if success:
                 self.refresh_repo_list()
                 guiSetAuditLog(self, "Dashboard")
@@ -108,7 +108,7 @@ class DashboardPage(QWidget):
                 QMessageBox.critical(self, "Error", "Failed to delete repository from database.")
     def handle_follow(self, repo_obj):
         if repo_obj:
-            self.on_repo_selected(repo_obj,self.program_type)
+            self.on_repo_selected(repo_obj,self.programType)
 
     def perform_repo_pull(self, repo_obj, local_dest):
         # 1. Resolve the Server Storage Root (same as before)
